@@ -1,0 +1,8 @@
+lib: [
+  "_build/install/default/lib/v64_Cortex/META"
+  "_build/install/default/lib/v64_Cortex/dune-package"
+  "_build/install/default/lib/v64_Cortex/opam"
+]
+bin: [
+  "_build/install/default/bin/v64_Cortex"
+]

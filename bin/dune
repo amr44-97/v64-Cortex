@@ -1,0 +1,4 @@
+(executable
+ (public_name v64_Cortex)
+ (name main)
+ (libraries v64_Cortex))
