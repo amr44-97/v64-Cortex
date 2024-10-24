@@ -6,3 +6,6 @@ lib: [
 bin: [
   "_build/install/default/bin/v64_Cortex"
 ]
+doc: [
+  "_build/install/default/doc/v64_Cortex/README.md"
+]
