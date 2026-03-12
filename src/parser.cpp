@@ -1,5 +1,6 @@
 #include "ast.h"
 #include "c12-lib.h"
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <print>
@@ -96,6 +97,14 @@ NodeIndex add_literal(Ast& ast, AstKind _kind, TokenIndex token, bool value) {
     return ast.nodes.append({.kind = _kind, .main_token = token, .literal = Literal{.bool_value = value}});
 }
 
+NodeIndex add_unary(Ast& ast, AstKind kind, TokenIndex main_token, NodeIndex expr) {
+    return ast.nodes.append(Node{.kind = kind, .main_token = main_token, .unary = {.expr = expr}});
+}
+
+NodeIndex add_binary(Ast& ast, AstKind kind, TokenIndex main_token, NodeIndex lhs, NodeIndex rhs) {
+    return ast.nodes.append(Node{.kind = kind, .main_token = main_token, .binary = {.lhs = lhs, .rhs = rhs}});
+}
+
 // #define expect_expr(_AST_, _KIND_) \
 //     ({ \
 //         if (_AST_.current.kind != _KIND_) { \
@@ -110,21 +119,19 @@ NodeIndex add_literal(Ast& ast, AstKind _kind, TokenIndex token, bool value) {
 auto primary(Ast& ast) -> NodeIndex {
     using enum TokenKind;
 
-    switch (ast.current.kind) {
+    switch (ast.tokens[ast.toki].kind) {
     case Identifier: {
         if (ast.match({Identifier, LBracket})) {
         }
     }
     case StringLiteral: {
-        auto l = add_literal(ast, AstKind::StringLiteral, ast.toki, ast.current.buf);
+        auto l = add_literal(ast, AstKind::StringLiteral, ast.toki, ast.tokens[ast.toki].buf);
         next_token(ast);
         return l;
     }
     case NumberLiteral: {
-        TokenIndex lit_token = next_token(ast);
-        const char* buf = copy_and_nullterm(ast.get_buf());
-        i64 parsed_int = atoi(buf);
-        return add_literal(ast, AstKind::NumberLiteral, lit_token, parsed_int);
+		auto t = next_token(ast);
+        return add_literal(ast, AstKind::NumberLiteral, t, ast.tokens[t].value.integer);
     } break;
     case Keyword_true: {
         auto l = add_literal(ast, AstKind::BooleanLiteral, ast.toki, true);
@@ -159,7 +166,8 @@ auto primary(Ast& ast) -> NodeIndex {
     }
 
     default:
-        printf("[Parsing Error]: expected primary expression!\n");
+        println("[Parsing Error]: expected primary expression but found `{}:{}`", to_str(ast.current.kind),ast.current.buf);
+		println("               | {}",line_of(ast, ast.toki));
         exit(1);
 
     } // end switch
@@ -168,28 +176,192 @@ auto primary(Ast& ast) -> NodeIndex {
 
 NodeIndex parse_expr(Ast& ast) { return parse_precedence(ast, 0); }
 
-NodeIndex add_unary(Ast& ast, AstKind kind, TokenIndex main_token, NodeIndex expr) {
-    return ast.nodes.append(Node{.kind = kind, .main_token = main_token, .unary = {.expr = expr}});
-}
+
+// Precedence constants for C-like operators
+constexpr int PREC_NONE = 0;
+constexpr int PREC_ASSIGN = 1;      // = += -= *= /= %= &= ^= |= <<= >>=
+constexpr int PREC_LOGICAL_OR = 2;  // ||
+constexpr int PREC_LOGICAL_AND = 3; // &&
+constexpr int PREC_BITWISE_OR = 4;  // |
+constexpr int PREC_BITWISE_XOR = 5; // ^
+constexpr int PREC_BITWISE_AND = 6; // &
+constexpr int PREC_EQUALITY = 7;    // == !=
+constexpr int PREC_RELATIONAL = 8;  // < > <= >=
+constexpr int PREC_SHIFT = 9;       // << >>
+constexpr int PREC_TERM = 10;       // + -
+constexpr int PREC_FACTOR = 11;     // * / %
+constexpr int PREC_UNARY = 12;      // ! - ~ & *
+constexpr int PREC_CALL = 13;       // . () []
 
 // `Operator` `expr`
 NodeIndex parse_unary(Ast& ast) {
     using enum TokenKind;
     AstKind op;
 
-    switch (ast.current.kind) {
-		case Minus: op = AstKind::Neg; break;
-		case Tilde: op = AstKind::BitNot; break;
-		case Bang:  op = AstKind::BoolNot; break;
-		case Ampersand: op = AstKind::AddressOf; break;
-		default: return primary(ast);
+    switch (ast.tokens[ast.toki].kind) {
+    case Minus:
+        op = AstKind::Neg;
+        break;
+    case Tilde:
+        op = AstKind::BitNot;
+        break;
+    case Bang:
+        op = AstKind::BoolNot;
+        break;
+    case Ampersand:
+        op = AstKind::AddressOf;
+        break;
+    default:
+        return primary(ast);
     }
     auto op_token = next_token(ast);
-    NodeIndex expr = parse_expr(ast);
+    NodeIndex expr = parse_precedence(ast, PREC_UNARY);
     return add_unary(ast, op, op_token, expr);
 }
 
-NodeIndex parse_precedence(Ast& ast, int prec) {
-    assert(prec >= 0);
-    auto lhs = parse_unary(ast);
+int get_precedence(TokenKind kind) {
+    using enum TokenKind;
+    switch (kind) {
+    case Equal:
+    case PlusEq:
+    case MinusEq:
+    case AsteriskEq:
+    case SlashEq:
+    case PercentEq:
+    case PipeEq:
+    case AmpersandEq:
+    case CaretEq:
+    case ShiftLeftEq:
+    case ShiftRightEq:
+        return PREC_ASSIGN;
+
+    case PipePipe:
+        return PREC_LOGICAL_OR;
+    case AmpersandAmpersand:
+        return PREC_LOGICAL_AND;
+    case Pipe:
+        return PREC_BITWISE_OR;
+    case Caret:
+        return PREC_BITWISE_XOR;
+    case Ampersand:
+        return PREC_BITWISE_AND;
+
+    case EqualEq:
+    case BangEq:
+        return PREC_EQUALITY;
+
+    case LessThan:
+    case LessOrEq:
+    case GreaterThan:
+    case GreaterOrEq:
+        return PREC_RELATIONAL;
+
+    case ShiftLeft:
+    case ShiftRight:
+        return PREC_SHIFT;
+
+    case Plus:
+    case Minus:
+        return PREC_TERM;
+
+    case Asterisk:
+    case Slash:
+    case Percent:
+        return PREC_FACTOR;
+
+    default:
+        return PREC_NONE;
+    }
+}
+
+bool is_right_associative(TokenKind kind) {
+    // In C, assignment operations bind right-to-left
+    return get_precedence(kind) == PREC_ASSIGN;
+}
+
+AstKind token_to_binary_ast_kind(Ast& ast, TokenKind kind) {
+    using enum TokenKind;
+    switch (kind) {
+    case Plus:
+        return AstKind::Add;
+    case Minus:
+        return AstKind::Sub;
+    case Asterisk:
+        return AstKind::Mul;
+    case Slash:
+        return AstKind::Div;
+    case Percent:
+        return AstKind::Mod;
+    case LessThan:
+        return AstKind::Lt;
+    case GreaterThan:
+        return AstKind::Gt;
+    case LessOrEq:
+        return AstKind::LtEq;
+    case GreaterOrEq:
+        return AstKind::GtEq;
+    case EqualEq:
+        return AstKind::EqEq;
+    case BangEq:
+        return AstKind::NotEq;
+    case AmpersandAmpersand:
+        return AstKind::BoolAnd;
+    case PipePipe:
+        return AstKind::BoolOr;
+    case Pipe:
+        return AstKind::BitOr;
+    case Ampersand:
+        return AstKind::BitAnd;
+    case Caret:
+        return AstKind::BitXor;
+    case ShiftLeft:
+        return AstKind::Shl;
+    case ShiftRight:
+        return AstKind::Shr;
+
+    // Map all assignment variants to the single Assign AstKind
+    // The parser consumer will differentiate them using the node's `main_token`
+    case Equal:
+    case PlusEq:
+    case MinusEq:
+    case AsteriskEq:
+    case SlashEq:
+    case PercentEq:
+    case PipeEq:
+    case AmpersandEq:
+    case CaretEq:
+    case ShiftLeftEq:
+    case ShiftRightEq:
+        return AstKind::Assign;
+
+    default:
+        println(stderr, "[Parser Error]: token {} is not a binary operator", to_str(kind));
+        println(stderr, "              | {}", line_of(ast, ast.toki));
+        exit(1);
+    }
+}
+
+
+NodeIndex parse_precedence(Ast& ast, int min_prec) {
+    assert(min_prec >= 0);
+    NodeIndex lhs = parse_unary(ast);
+
+    while (true) {
+        TokenKind op = ast.tokens[ast.toki].kind;
+        int prec = get_precedence(op);
+
+        if (prec < min_prec || prec == PREC_NONE) {
+            break;
+        }
+
+        TokenIndex op_token = next_token(ast);
+
+        int next_prec = prec + (is_right_associative(op) ? 0 : 1);
+
+        NodeIndex rhs = parse_precedence(ast, next_prec);
+
+        lhs = add_binary(ast, token_to_binary_ast_kind(ast, op), op_token, lhs, rhs);
+    }
+
+    return lhs;
 }
