@@ -1,13 +1,13 @@
 #pragma once
 #include <assert.h>
 #include <initializer_list>
+#include <print>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <string>
 #include <string_view>
-#include <print>
 
 typedef std::string_view StringRef;
 typedef std::string String;
@@ -133,7 +133,7 @@ enum class TokenKind : u32 {
     ShiftLeftEq,
     LessOrEq,
     GreaterThan,
-    ShiftRight,      // >>
+    ShiftRight,   // >>
     ShiftRightEq, // >>=
     GreaterOrEq,
     Keyword_return,
@@ -365,11 +365,11 @@ struct Token {
         // index of the Identifier in ParsingContext.str_list;
         // get the symbol by ParsingContext.get(u32 id) -> string_view
         void* none;
-		u64 integer;
+        i64 integer;
         double floating_point;
 
         bool boolean;
-    } value = { .none = nullptr };
+    } value = {.none = nullptr};
 };
 
 template <typename T, usize Alignment = alignof(T)> struct DynArray {
@@ -730,13 +730,22 @@ template <typename Fn> struct DeferGuard {
 
 struct File {
     const char* name;
-    String content;
+    const char* content;
 
     const char& operator[](usize _index) const { return content[_index]; }
 };
 
 StringRef to_str(TokenKind kind);
 StringRef to_str(AstKind kind);
+
+constexpr File create_file(const char* name, const char* content) { 
+	File f;
+	f.name = name;
+	auto contlen = strlen(content);
+	f.content = temp_alloc(char, contlen + 1);
+	memcpy((char*)f.content, content, contlen);
+	return f;
+}
 
 constexpr Arena create_arena(usize initial_size = ARENA_INIT_MEMORY) {
     auto a = Arena{
@@ -766,10 +775,11 @@ constexpr File read_file(const char* file_name) {
     fseek(fp, 0, SEEK_END);
     size_t fsize = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    auto f = File{.name = file_name, .content = {}};
-    f.content.resize(fsize + 1);
+    File f = {};
+    f.name = file_name;
+    f.content = c12malloc(char, fsize+ 1);
 
-    size_t n = fread(&f.content[0], sizeof(char), fsize, fp);
+    size_t n = fread((char*)f.content, sizeof(char), fsize, fp);
 
     if (n != fsize) {
         fprintf(stderr, "[Lexing Error]: expected %lu bytes from file `%s` but got %lu bytes\n", fsize,
