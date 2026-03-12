@@ -5,7 +5,7 @@ CFLAGS_DEBUG = -Wall -std=c++26 -O0 -ggdb -fsanitize=address -fno-omit-frame-poi
 
 CFLAGS = $(CFLAGS_FAST)
 
-EXE = c12
+EXE = v64
 OUTPUT_DIR = bin
 
 CPP_FILES = src/main.cpp src/lexer.cpp  #src/parser.cpp
@@ -14,3 +14,5 @@ CPP_FILES = src/main.cpp src/lexer.cpp  #src/parser.cpp
 $(EXE):
 	$(CC) $(CFLAGS) -o $(OUTPUT_DIR)/$(EXE) $(CPP_FILES)
 
+clean:
+	rm bin/*
