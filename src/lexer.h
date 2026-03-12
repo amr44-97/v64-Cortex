@@ -1,9 +1,13 @@
 #pragma once
 #include "c12-lib.h"
+struct Lexer;
+
+Token next_token(Lexer& l);
 
 struct Lexer {
     const char* current_file;
-    StringRef source;
+    const char* source;
+    usize buflen;
     DynArray(Token) & tokens;
 
     u32 pos = 0;
@@ -15,7 +19,7 @@ struct Lexer {
     constexpr u32 advance(int offset = 1) {
         pos += offset;
         col += offset;
-		return pos; 
+        return pos;
     }
 
     u32 nextChar() {
@@ -23,7 +27,25 @@ struct Lexer {
         col += 1;
         return pos;
     }
+    static constexpr Lexer create(File file, DynArray<Token>& tokens) {
+        Lexer l = Lexer{
+            .current_file = file.name,
+            .source = file.content,
+            .buflen = strlen(file.content),
+            .tokens = tokens,
+            .pos = 0,
+            .line = 1,
+            .col = 1,
+        };
+
+        while (true) {
+            auto tok = next_token(l);
+
+            if (tok.kind == TokenKind::Eof)
+                break;
+        }
+
+        return l;
+    }
 };
 
-Token next_token(Lexer& l);
-Lexer create_lexer(File& file, DynArray<Token>& tokens);

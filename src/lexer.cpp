@@ -1,30 +1,18 @@
 #include "lexer.h"
-#include "ast.h"
 #include "c12-lib.h"
 #include <boost/unordered/unordered_flat_map.hpp>
-#include <string>
+
+#define copy_and_nullterm(__string_t)                                                                        \
+    ({                                                                                                       \
+        auto buflen = __string_t.size();                                                                     \
+        auto __buf = temp_alloc(char, buflen + 1);                                                           \
+        memcpy(__buf, __string_t.data(), buflen);                                                            \
+        __buf[buflen] = '\0';                                                                                \
+        __buf;                                                                                               \
+    })
 
 template <typename K, typename V> using Map = boost::unordered::unordered_flat_map<K, V>;
 
-Lexer create_lexer(File& file, DynArray<Token>& tokens) {
-    Lexer l = Lexer{
-        .current_file = file.name,
-        .source = file.content,
-        .tokens = tokens,
-        .pos = 0,
-        .line = 1,
-        .col = 1,
-    };
-
-    while (true) {
-        auto tok = next_token(l);
-
-        if (tok.kind == TokenKind::Eof)
-            break;
-    }
-
-    return l;
-}
 
 void skip_whitespace(Lexer& self) {
     char c = self.source[self.pos];
@@ -64,10 +52,9 @@ static Map<StringRef, TokenKind> Keywords = {
     {"f64", TokenKind::Keyword_f64},
 };
 
-
 StringRef line_of(Lexer& self, Token* t = nullptr) {
     usize line_end = 0;
-    usize buflen = self.source.length();
+    usize buflen = self.buflen;
     for (u32 i = 0; i < buflen; ++i) {
         if (self.source[i] == '\n') {
             line_end = i;
@@ -82,7 +69,7 @@ StringRef line_of(Lexer& self, Token* t = nullptr) {
         res;
     });
     auto line_len = line_end - line_start;
-    return self.source.substr(line_start, line_len);
+    return StringRef(&self.source[line_start], line_len);
 }
 
 Token new_token(Lexer& self, TokenKind kind, StringRef buf, u32 start, u32 end) {
@@ -101,7 +88,7 @@ Token identifier(Lexer& self) {
             self.pos++;
             break;
         default:
-            auto buf = self.source.substr(start, self.pos - start);
+            StringRef buf = StringRef(&self.source[start], self.pos - start);
             auto kind = TokenKind::Identifier;
             if (auto iter = Keywords.find(buf); iter != Keywords.end()) {
                 kind = iter->second;
@@ -116,16 +103,13 @@ Token number_literal(Lexer& self) {
     while (true) {
         switch (self.source[self.pos]) {
         case '0' ... '9':
-            self.pos++;
+        	self.pos += 1;
             break;
         default:
-            auto buf = self.source.substr(start, self.pos - start);
+            StringRef buf = StringRef(&self.source[start], self.pos - start);
             auto kind = TokenKind::NumberLiteral;
-            if (auto iter = Keywords.find(buf); iter != Keywords.end()) {
-                kind = iter->second;
-            }
             auto t = new_token(self, kind, buf, start, self.pos);
-            t.value.integer = atoi(copy_and_nullterm(buf));
+             t.value.integer = atoi(copy_and_nullterm(buf));
             return t;
         }
     }
@@ -140,7 +124,7 @@ Token char_literal(Lexer& self) {
             break;
         case '\'':
             self.pos++;
-            auto buf = self.source.substr(start, self.pos - start);
+            auto buf = StringRef(&self.source[start], self.pos - start);
             auto kind = TokenKind::CharLiteral;
             return new_token(self, kind, buf, start, self.pos);
         }
@@ -158,14 +142,14 @@ Token string_literal(Lexer& self) {
             advance_to_nl(self);
             break;
         case '\0': {
-            auto buf = self.source.substr(start, self.pos - start);
+            auto buf = StringRef(&self.source[start], self.pos - start);
             println("[error]: Eof at the end of string -> `{}` ", buf);
             println("        | {}", line_of(self));
             exit(1);
         }
         case '"':
             self.pos++;
-            auto buf = self.source.substr(start, self.pos - start);
+            auto buf = StringRef(&self.source[start], self.pos - start);
             auto kind = TokenKind::StringLiteral;
             return new_token(self, kind, buf, start, self.pos);
         }
@@ -193,6 +177,9 @@ Token next_token(Lexer& self) {
     using enum TokenKind;
     self.lexing_start = self.pos;
 
+    if (self.pos >= self.buflen) {
+        return new_token(self, Eof, "", self.pos, self.pos);
+    }
     switch (self.source[self.pos]) {
 
     case '\0':
@@ -393,7 +380,8 @@ Token next_token(Lexer& self) {
         return new_token(self, RParen, ")", self.pos, self.nextChar());
 
     default:
-        println("[error]: Unhandled char `{}` at [{}:{}:{}]",self.source[self.pos], self.current_file ,self.line, self.col);
+        println("[error]: Unhandled char `{}` at [{}:{}:{}]", self.source[self.pos], self.current_file,
+                self.line, self.col);
         println("        |{}: {}", self.line, line_of(self));
         exit(1);
     }
