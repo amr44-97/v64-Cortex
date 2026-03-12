@@ -22,7 +22,6 @@ typedef Index Name;
 struct AstNode;
 struct Type;
 
-
 // the Op is known by the AstKind
 struct BinaryExpr {
     NodeIndex lhs;
@@ -197,7 +196,7 @@ struct Node {
         UnaryExpr unary;
         BinaryExpr binary;
         ArrayIndex array_index;
-		NodeIndex grouped; // for grouped expr
+        NodeIndex grouped; // for grouped expr
         VarDecl var;
         IfStmt if_stmt;
         WhileStmt while_stmt;
@@ -218,27 +217,32 @@ struct LocationSpan {
 };
 
 struct Ast {
-    StringRef source; // the file from which we are producing this Ast
-    DynArray<Token> tokens;
+    StringRef file_name;
+    StringRef source;       // the file from which we are producing this Ast
+    DynArray<Token> tokens; // uses realloc not the Ast arena
     DynArray<Node> nodes;
     DynArray<Node> extra;
-	Token current;
+    Token current;
     Arena arena;
     u32 toki; // current token index
-	
-	void set_current_token(){
-		current = tokens[toki];
-	}
-    void skip_token() {
-        toki++;
-		current = tokens[toki];
+
+    void deinit() {
+        tokens.destroy();
+        nodes.destroy();
+        arena.deinit();
     }
 
-	// just explicit
-    void skip_token(TokenKind k) {
-		assert(tokens[toki].kind == k);
+    void set_current_token() { current = tokens[toki]; }
+    void skip_token() {
         toki++;
-		current = tokens[toki];
+        current = tokens[toki];
+    }
+
+    // just explicit
+    void skip_token(TokenKind k) {
+        assert(tokens[toki].kind == k);
+        toki++;
+        current = tokens[toki];
     }
 
     template <typename T> T* alloc(usize nelems = 1) { return arena.alloc<T>(nelems); }
@@ -272,18 +276,17 @@ struct Ast {
                 return false;
         }
         toki += size;
-		current = tokens[toki];
+        current = tokens[toki];
         return true;
     }
 
     Token get_token(i32 offset = 0) { return tokens[toki + offset]; }
-    Token get(u32 offset) { return tokens[offset];} 
-	StringRef get_buf(i32 offset = 0) { return tokens[toki + offset].buf; }
+    Token get(u32 offset) { return tokens[offset]; }
+    StringRef get_buf(i32 offset = 0) { return tokens[toki + offset].buf; }
     TokenKind get_kind(i32 offset = 0) { return tokens[toki + offset].kind; }
-
 };
 
-Ast new_ast(StringRef source);
+Ast new_ast(File source);
 Optional<TokenIndex> eat_token(Ast&, TokenKind);
 TokenIndex expect_token(Ast&, TokenKind);
 TokenIndex next_token(Ast&);
