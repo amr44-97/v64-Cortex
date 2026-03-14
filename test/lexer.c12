@@ -1,0 +1,14 @@
+import std.*;
+
+pub struct Ltext {
+    src: []char,
+    len: usize,
+}
+
+
+
+
+ 
+struct Lexer {
+
+}

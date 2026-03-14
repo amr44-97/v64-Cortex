@@ -1,0 +1,39 @@
+import std.io.*;
+
+const u8 = unsigned char;
+ 
+const file_name = "Hello World";
+// Changes from C 
+// module system 
+// const can infer type and can be a real constant
+// macro system that can do the normal preprocessor shit
+// defer 
+// methods through impl 
+// interfaces and traits
+// named function args, and default arguments
+// function overloading 
+// ffi
+// keep the goto and the long jump
+// you will be able to do more shit on the global scope
+// lambdas and local function declarations
+// block expr {} like gnu stmt expr ({})
+
+
+#define `match $expr `with `{
+         `| $expr `-> $expr,
+          ...
+        `}  #as(match_expr) = {
+
+} 
+
+
+void main(string[] args) {
+    const string s= "Hello World!";
+    char s2[] = s[0..5].get_copy();
+    char* const s3 = s[0..5];
+    
+
+    println("{} , {}",s, s2);
+}
+
+
