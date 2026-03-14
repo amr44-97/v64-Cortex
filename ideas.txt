@@ -1,0 +1,18 @@
+# Plan
+- start from simple things and get the language work first
+- the first things to be done would propably be handling the type system and inference properly
+
+# Changes from C 
+1- module system 
+2- const can infer type and can be a real constant
+3- macro system that can do the normal preprocessor shit
+4- defer 
+5- methods through impl 
+6- interfaces and traits
+7- named function args, and default arguments
+8- function overloading 
+9- ffi
+10- keep the goto and the long jump
+11- you will be able to do more shit on the global scope
+12- lambdas and local function declarations
+13- block expr {} like gnu stmt expr ({})
