@@ -275,7 +275,6 @@ int get_precedence(TokenKind kind) {
 }
 
 bool is_right_associative(TokenKind kind) {
-    // In C, assignment operations bind right-to-left
     return get_precedence(kind) == PREC_ASSIGN;
 }
 
@@ -319,8 +318,6 @@ AstKind token_to_binary_ast_kind(Ast& ast, TokenKind kind) {
     case ShiftRight:
         return AstKind::Shr;
 
-    // Map all assignment variants to the single Assign AstKind
-    // The parser consumer will differentiate them using the node's `main_token`
     case Equal:
     case PlusEq:
     case MinusEq:

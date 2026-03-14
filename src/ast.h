@@ -50,13 +50,18 @@ union Literal {
     bool bool_value;
 };
 
+struct FuncDeclArg {
+	Index name;
+	Index type;
+};
+
 struct Func {
     // index into a string list saved by the Ast
     StringIndex name;
-    DynArray<Index> arg_name;
-    // index into a type list saved by the Ast
-    DynArray<Index> arg_types;
-
+    // DynArray<Index> arg_name;
+    // // index into a type list saved by the Ast
+    // DynArray<Index> arg_types;
+	Span<Index> args;
     // a list of expressions, since they are optional
     DynArray<NodeIndex>* default_values = nullptr;
 
