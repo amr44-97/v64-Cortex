@@ -1,16 +1,7 @@
 #pragma once
 
-#include "c12-lib.h"
-#include <cassert>
-
-#define copy_and_nullterm(__string_t)                                                                        \
-    ({                                                                                                       \
-        auto buflen = __string_t.size();                                                                     \
-        auto __buf = temp_alloc(char, buflen + 1);                                                           \
-        memcpy(__buf, __string_t.data(), buflen);                                                            \
-        __buf[buflen] = '\0';                                                                                \
-        __buf;                                                                                               \
-    })
+#include "cortex.h"
+#include "initializer_list.h"
 
 typedef u32 Index; // used as TokenIndex , NodeIndex, StringIndex
 typedef u32 NodeIndex;
@@ -21,6 +12,82 @@ typedef Index Name;
 
 struct AstNode;
 struct Type;
+
+enum TypeKind : u64 {
+    TYPE_VOID = 1 << 0, // 1
+    TYPE_INT = 1 << 1,
+    TYPE_SIGNED = 1 << 2,
+    TYPE_UNSIGNED = 1 << 3,
+    TYPE_CHAR = 1 << 4,
+    TYPE_SHORT = 1 << 5,
+    TYPE_LONG = 1 << 6,
+    TYPE_BOOL = 1 << 7,
+    TYPE_DOUBLE = 1 << 8,
+    TYPE_FLOAT = 1 << 9,
+    TYPE_LONG_LONG = 1 << 10,
+    TYPE_BITS8 = 1 << 11,
+    TYPE_BITS16 = 1 << 12,
+    TYPE_BITS32 = 1 << 13,
+    TYPE_BITS64 = 1 << 14,
+    TYPE_F32 = 1 << 15,
+    TYPE_F64 = 1 << 16,
+    TYPE_POINTER = 1 << 17,
+    TYPE_ARRAY = 1 << 18,
+    TYPE_I8 = TYPE_SIGNED | TYPE_BITS8,
+    TYPE_U8 = TYPE_UNSIGNED | TYPE_BITS8,
+
+    TYPE_I16 = TYPE_SIGNED | TYPE_BITS16,
+    TYPE_U16 = TYPE_UNSIGNED | TYPE_BITS16,
+    TYPE_I32 = TYPE_SIGNED | TYPE_BITS32,
+    TYPE_U32 = TYPE_UNSIGNED | TYPE_BITS32,
+    TYPE_I64 = TYPE_SIGNED | TYPE_BITS64,
+    TYPE_U64 = TYPE_UNSIGNED | TYPE_BITS64,
+
+    TYPE_LONG_DOUBLE = TYPE_LONG | TYPE_DOUBLE,
+    TYPE_SINT = TYPE_SIGNED | TYPE_INT,
+    TYPE_UINT = TYPE_UNSIGNED | TYPE_INT,
+    TYPE_SCHAR = TYPE_SIGNED | TYPE_CHAR,
+    TYPE_UCHAR = TYPE_UNSIGNED | TYPE_CHAR,
+    TYPE_SSHORT = TYPE_SIGNED | TYPE_SHORT,
+    TYPE_USHORT = TYPE_UNSIGNED | TYPE_SHORT,
+    TYPE_SLONG = TYPE_SIGNED | TYPE_LONG,
+    TYPE_ULONG = TYPE_UNSIGNED | TYPE_LONG,
+};
+
+const char* to_str(u64 type_kind);
+
+// AU64st contain an dynArray<Type> similar to the Node list
+// index 0 means null
+
+// TODO: add string interner in the Ast to replace StringRef
+
+struct Container {
+    DynArray<TypeIndex> fields;
+    // TypeName member_name = value;
+    DynArray<NodeIndex> members; // in case of enums , should be a constant expression
+};
+
+// used for both arrays and pointers
+struct PtrType {
+    TypeIndex base;
+    NodeIndex len;
+};
+
+struct Type {
+    u64 id;
+    String name = {};
+    bool resolved = false;
+    bool is_static = false;
+    bool is_const = false;
+
+    union {
+        Container Struct;
+        Container Enum;
+        PtrType ptr;
+        PtrType array;
+        void* none;
+    };
+};
 
 // the Op is known by the AstKind
 struct BinaryExpr {
@@ -38,21 +105,12 @@ struct Member {
     NodeIndex field;
 
     // concatinate all the name from nodes separated by `.`
-    String get_final_name();
-};
-
-union Literal {
-    void* none;
-    i64 int_value;
-    double float_value;
-    StringRef str;
-    StringRef enum_literal;
-    bool bool_value;
+    const char* get_final_name();
 };
 
 struct FuncDeclArg {
-	Index name;
-	Index type;
+    Index name;
+    Index type;
 };
 
 struct Func {
@@ -61,7 +119,7 @@ struct Func {
     // DynArray<Index> arg_name;
     // // index into a type list saved by the Ast
     // DynArray<Index> arg_types;
-	Span<Index> args;
+    Span<Index> args;
     // a list of expressions, since they are optional
     DynArray<NodeIndex>* default_values = nullptr;
 
@@ -78,7 +136,7 @@ struct Return {
 };
 
 struct VarDecl {
-    StringIndex name;
+    StringRef name;
     TypeIndex type;
     NodeIndex init_expr;
 };
@@ -113,7 +171,6 @@ struct Call {
     NodeIndex callee;
     // list of expr
     DynArray<NodeIndex> args;
-
     // for named arguments
     // TODO: Impel later
     // DynArray<StringIndex> arg_names;
@@ -125,8 +182,8 @@ struct Identifier {
 
 // expr[index]
 struct ArrayIndex {
-    NodeIndex expr; // array name
-    NodeIndex index;
+    NodeIndex ident; // array name
+    NodeIndex expr;  // index expr
 };
 // Arr[start..end]
 struct Slice {
@@ -186,21 +243,22 @@ struct Root {
 };
 
 struct Node {
-    AstKind kind;
+    AstTag tag;
     // instead of adding it to the union
     TokenIndex main_token;
-    Type* type = nullptr;
-    // we can traverse the children nodes to get the exact range of locs
+    TypeIndex type = 0;
 
+    // we can traverse the children nodes to get the exact range of locs
+    // literals values are contained within the Token
     union { /* data */
         Root root;
         Func func;
+        Call call;
         Return ret;
         Block block;
-        Literal literal;
         UnaryExpr unary;
         BinaryExpr binary;
-        ArrayIndex array_index;
+        ArrayIndex array_access;
         NodeIndex grouped; // for grouped expr
         VarDecl var;
         IfStmt if_stmt;
@@ -222,11 +280,13 @@ struct LocationSpan {
 };
 
 struct Ast {
-    StringRef file_name;
+    const char* file_name;
     StringRef source;       // the file from which we are producing this Ast
     DynArray<Token> tokens; // uses realloc not the Ast arena
     DynArray<Node> nodes;
     DynArray<Node> extra;
+    DynArray<Type> types;
+    DynArray<StringRef> identifiers;
     Token current;
     Arena arena;
     u32 toki; // current token index
@@ -243,18 +303,22 @@ struct Ast {
         current = tokens[toki];
     }
 
+    Token token_of(NodeIndex node) { return tokens[nodes[node].main_token]; }
     // just explicit
-    void skip_token(TokenKind k) {
-        assert(tokens[toki].kind == k);
+    void skip_token(TokenTag k) {
+        assert(tokens[toki].tag == k);
         toki++;
         current = tokens[toki];
     }
 
     template <typename T> T* alloc(usize nelems = 1) { return arena.alloc<T>(nelems); }
 
-    void advance(u32 i = 1) { toki += i; }
+    void advance(u32 i = 1) {
+        toki += i;
+        set_current_token();
+    }
 
-    constexpr auto match(std::initializer_list<TokenKind> items) -> bool {
+    constexpr auto match(std::initializer_list<TokenTag> items) -> bool {
         const auto begin = items.begin();
         const auto size = items.size();
 
@@ -262,14 +326,14 @@ struct Ast {
             return false;
 
         for (usize i = 0; i < size; i++) {
-            if (begin[i] != tokens[toki + i].kind)
+            if (begin[i] != tokens[toki + i].tag)
                 return false;
         }
 
         return true;
     }
 
-    constexpr auto match_go(std::initializer_list<TokenKind> items) -> bool {
+    constexpr auto match_go(std::initializer_list<TokenTag> items) -> bool {
         const auto begin = items.begin();
         const auto size = items.size();
 
@@ -277,7 +341,7 @@ struct Ast {
             return false;
 
         for (usize i = 0; i < size; i++) {
-            if (begin[i] != tokens[toki + i].kind)
+            if (begin[i] != tokens[toki + i].tag)
                 return false;
         }
         toki += size;
@@ -288,14 +352,15 @@ struct Ast {
     Token get_token(i32 offset = 0) { return tokens[toki + offset]; }
     Token get(u32 offset) { return tokens[offset]; }
     StringRef get_buf(i32 offset = 0) { return tokens[toki + offset].buf; }
-    TokenKind get_kind(i32 offset = 0) { return tokens[toki + offset].kind; }
+    TokenTag get_kind(i32 offset = 0) { return tokens[toki + offset].tag; }
 };
 
 Ast new_ast(File source);
-Optional<TokenIndex> eat_token(Ast&, TokenKind);
-TokenIndex expect_token(Ast&, TokenKind);
+Option<TokenIndex> eat_token(Ast&, TokenTag);
+TokenIndex expect_token(Ast&, TokenTag);
 TokenIndex next_token(Ast&);
 
+TypeIndex parse_base_type(Ast& ast);
 NodeIndex parse(Ast&); // the entry point
 NodeIndex primary(Ast&);
 NodeIndex parse_unary(Ast&);
