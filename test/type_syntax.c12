@@ -1,0 +1,64 @@
+// struct
+struct Vec3f {
+    float x,y,z;
+}
+
+// enum
+enum Color {
+    White,
+    Black,
+    Red,
+    Green,
+    Blue,
+}
+
+// union | tagged unions 
+union Value { string s; int num; float fnum; }
+union(enum) Value2 { string s; int num; float fnum; }
+
+// simple primitive types
+int , char, short , long , long long , double , long double ,float
+// some of these types can be preceeded with signed or unsigned
+signed/unsigned char, int, shor, long
+
+// fixed size integers and floats
+i8 u8  i16 u16 i32 u32 i64 u64 f32 f64
+
+// Typedef , better than C's typedef but we will keep the C typedef
+typedef String = struct { char* ptr; u32 len; };
+typedef struct { char*ptr; u32 len; } String;
+
+
+// suggestions for generics
+void print(type T, T value) {
+    printf("" ++ fmt_of(T) ++ "\n", value);
+}
+
+print(int,123);
+
+ 
+// Ptr 
+
+u8*  buffer = malloc(sizeof(u8) * 256);
+
+sizeof(u8*) = 16;
+sizeof(@nonull u8*) = 8;
+sizeof(@raw u8*) = 8;
+
+let buflen = buffer.len; // since it is known some where within the compiler why not add it 
+let bufptr = buffer.ptr;
+
+let buf_array = buffer; 
+
+
+
+
+
+
+
+
+
+
+
+
+
