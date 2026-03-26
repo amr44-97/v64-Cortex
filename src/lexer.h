@@ -1,5 +1,6 @@
 #pragma once
-#include "c12-lib.h"
+#include "cortex.h"
+
 struct Lexer;
 
 Token next_token(Lexer& l);
@@ -8,7 +9,7 @@ struct Lexer {
     const char* current_file;
     const char* source;
     usize buflen;
-    DynArray(Token) & tokens;
+    DynArray<Token>& tokens;
 
     u32 pos = 0;
     u32 line = 1;
@@ -41,11 +42,10 @@ struct Lexer {
         while (true) {
             auto tok = next_token(l);
 
-            if (tok.kind == TokenKind::Eof)
+            if (tok.tag == TOK_EOF)
                 break;
         }
 
         return l;
     }
 };
-
