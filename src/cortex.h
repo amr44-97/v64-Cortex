@@ -1,5 +1,7 @@
 #pragma once
+
 #include <assert.h>
+#include <cstdlib>
 #include <initializer_list>
 #include <stdint.h>
 #include <stdio.h>
@@ -35,11 +37,20 @@
         code;                                                                                                \
     }};
 
+#define match_t(T) switch (T.tag)
+
+#define with                                                                                                 \
+    break;                                                                                                   \
+    case
+
+#define with_default                                                                                         \
+    break;                                                                                                   \
+    default
+
 #define new_dyn(T, ...) create_dyn<T>(__VA_OPT__(__VA_ARGS__))
 #define new_arena(...) create_arena(__VA_OPT__(__VA_ARGS__))
 #define Some(VALUE) Option<decltype(VALUE)>(VALUE)
 #define None nullptr
-#define c12malloc(T, n) (T*)malloc(sizeof(T) * n)
 
 typedef uint8_t u8;
 typedef int8_t i8;
@@ -78,6 +89,16 @@ template <typename T> struct slice {
     T* begin() { return ptr; }
     T* end() { return ptr + len; }
 
+    T& back() { return ptr[len - 1]; }
+
+    T* dupe() {
+        // [Len][Data]
+        u64* mem = (u64*)malloc(sizeof(u64) + len * sizeof(T));
+        mem = len;
+        mem += 1;
+        memcpy(mem, ptr, len);
+        return mem;
+    }
     T& operator[](usize i) const {
         assert(i < len && "access beyond the lenght of the array");
         return ptr[i];
@@ -90,13 +111,14 @@ template <typename T> struct slice {
     }
 
     bool operator==(slice<T>& _buf) const {
-        if (len != _buf.len)
-            return false;
+        if (len != _buf.len) return false;
         return memcmp(_buf.ptr, ptr, _buf.len) == 0;
     }
 };
 
 using StringRef = std::string_view;
+#define FmtStrRef(SV) (int)(SV).size(), (SV).data()
+
 // struct CortexStringRef : slice<char> {
 //     StringRef() {}
 //     StringRef(slice<char>& __slice) {
@@ -372,46 +394,29 @@ enum AstTag {
     AST_ALIAS_STMT,
 };
 
-struct C12Arena {
-    u8* bytes = nullptr;
-    u8* current = nullptr;
-    usize capacity = 0;
+struct Allocator {
+    virtual ~Allocator() = default;
 
-    constexpr static C12Arena init(usize initial_size = ARENA_INIT_MEMORY) {
-        auto a = C12Arena{
-            .bytes = (u8*)calloc(initial_size, sizeof(u8)),
-            .current = 0,
-        };
-        a.current = a.bytes;
-        a.capacity = initial_size;
-        return a;
-    }
-
-    template <typename T, usize Size = sizeof(T)> T* alloc(usize elements) {
-        if (current >= (bytes + capacity)) {
-            fprintf(
-                stderr,
-                "[Allocator Error]: Temporary allocation exceded allocated memory -512KB- for the arena\n");
-            fprintf(stderr, "               to avoid use after free error or heap overflow increase the\n");
-            fprintf(stderr, "               arena initial capacity or create a new arena.\n");
-            exit(1);
-        }
-        auto cur = current;
-        current += (Size * elements);
-        return (T*)cur;
-    }
-
-    void deinit() {
-        if (bytes != nullptr) {
-            free(bytes);
-            current = nullptr;
-        }
-    }
-
-    ~C12Arena() { deinit(); }
+    virtual void* alloc(usize size) = 0;
+    virtual void dealloc(void* ptr) = 0;
+    virtual void deinit() = 0;
 };
 
-static C12Arena temp_allocator = C12Arena::init(TEMP_MEMORY);
+struct CAllocator : Allocator {
+    void* alloc(usize size) override {
+        void* ptr = malloc(size);
+        memset(ptr, 0, size);
+        return ptr;
+    }
+
+    template <typename T> T* alloc(usize nelems) { return alloc(nelems * sizeof(T)); }
+
+    void dealloc(void* ptr) override { std::free(ptr); }
+    void deinit() override {}
+    ~CAllocator() override {}
+};
+
+static CAllocator c_allocator = {};
 
 struct Location {
     u32 offset;
@@ -436,26 +441,28 @@ struct Token {
     } value = {.none = nullptr};
 };
 
-template <typename T, usize Alignment = alignof(T)> struct DynArray {
-    static_assert((Alignment & (Alignment - 1)) == 0, "Alignment must be a power of 2");
+template <typename T, usize Alignment = alignof(T)> struct RawArray {
+    T* ptr = nullptr;
+    u32 len = 0;
+    u32 capacity = 0;
 
-    DynArray<T> move() {
+    static_assert((Alignment & (Alignment - 1)) == 0, "Alignment must be a power of 2");
+    RawArray<T> move() {
         auto res = *this;
         ptr = nullptr;
         len = capacity = 0;
         return res;
     }
 
-    DynArray<T> copy() {
-        DynArray<T> cp = {};
+    RawArray<T> copy() {
+        RawArray<T> cp = {};
         cp.ensure_capacity(capacity);
         cp.append(ptr, len);
         return cp;
     }
 
     void ensure_capacity(usize new_capacity = 16) {
-        if (capacity >= new_capacity)
-            return;
+        if (capacity >= new_capacity) return;
         usize better_capacity = capacity;
 
         do {
@@ -464,7 +471,7 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
 
         const usize aligned_size = ((better_capacity * sizeof(T)) + Alignment - 1) & ~(Alignment - 1);
 
-        T* tmp = (T*)calloc(aligned_size, 1);
+        T* tmp = (T*)calloc(aligned_size, sizeof(T));
         if (ptr != nullptr and len > 0) {
             memcpy(tmp, ptr, len * sizeof(T));
             free(ptr);
@@ -484,14 +491,12 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     }
 
     constexpr bool enough_space_for(u32 n_items) const {
-        if ((capacity - len) >= n_items)
-            return true;
+        if ((capacity - len) >= n_items) return true;
         return false;
     }
 
     u32 append(T* items, usize n) {
-        if (!enough_space_for(n))
-            ensure_capacity(len + n + 1);
+        if (!enough_space_for(n)) ensure_capacity(len + n + 1);
 
         memcpy(&ptr[len], items, n);
         len += n;
@@ -499,8 +504,7 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     }
 
     u32 append(const T* items, usize n) {
-        if (!enough_space_for(n))
-            ensure_capacity(len + n + 1);
+        if (!enough_space_for(n)) ensure_capacity(len + n + 1);
 
         memcpy((void*)&ptr[len], items, n);
         len += n;
@@ -508,8 +512,7 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     }
 
     u32 append(T elem) {
-        if (capacity <= len + 1)
-            ensure_capacity(len + 1);
+        if (capacity <= len + 1) ensure_capacity(len + 1);
         ptr[len++] = elem;
         return len - 1;
     }
@@ -540,6 +543,8 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     T* begin() { return ptr; }
     T* end() { return ptr + len; }
 
+    T& back() { return ptr[len - 1]; }
+
     T& at(usize i) const {
         assert(i < len && "access beyond the lenght of the array");
         return ptr[i];
@@ -553,11 +558,182 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     T& operator[](usize i) const { return ptr[i]; }
 
     T& operator[](usize i) { return ptr[i]; }
+};
 
+template <typename T, usize Alignment = alignof(T)> struct DynArray {
     T* ptr = nullptr;
     u32 len = 0;
     u32 capacity = 0;
+    Allocator* allocator = &c_allocator;
+
+    static_assert((Alignment & (Alignment - 1)) == 0, "Alignment must be a power of 2");
+
+    DynArray() {}
+    
+	explicit DynArray(Allocator* _allocator) { this->allocator = _allocator; }
+	
+
+    DynArray<T> move() {
+        DynArray<T> res = *this;
+        ptr = nullptr;
+        len = capacity = 0;
+        return res;
+    }
+
+    DynArray<T> copy() {
+        DynArray<T> cp = {};
+        cp.ensure_capacity(capacity);
+        cp.append(ptr, len);
+        return cp;
+    }
+
+    void ensure_capacity(usize new_capacity = 16) {
+        if (capacity >= new_capacity) return;
+        usize better_capacity = capacity;
+
+        do {
+            better_capacity = better_capacity * 5 / 2 + 8;
+        } while (better_capacity < new_capacity);
+
+        const usize aligned_size = ((better_capacity * sizeof(T)) + Alignment - 1) & ~(Alignment - 1);
+
+        T* tmp = (T*)allocator->alloc(aligned_size);
+        if (ptr != nullptr and len > 0) {
+            memcpy(tmp, ptr, len * sizeof(T));
+            allocator->dealloc(ptr);
+        }
+        ptr = tmp;
+        capacity = better_capacity;
+    }
+
+    void reset() {
+        memset(ptr, 0, capacity * sizeof(T));
+        len = 0;
+    }
+
+    void destroy() {
+        free(ptr);
+        len = capacity = 0;
+    }
+
+    constexpr bool enough_space_for(u32 n_items) const {
+        if ((capacity - len) >= n_items) return true;
+        return false;
+    }
+
+    u32 append(T* items, usize n) {
+        if (!enough_space_for(n)) ensure_capacity(len + n + 1);
+
+        memcpy(&ptr[len], items, n);
+        len += n;
+        return len;
+    }
+
+    u32 append(const T* items, usize n) {
+        if (!enough_space_for(n)) ensure_capacity(len + n + 1);
+
+        memcpy((void*)&ptr[len], items, n);
+        len += n;
+        return len;
+    }
+
+    u32 append(T elem) {
+        if (capacity <= len + 1) ensure_capacity(len + 1);
+        ptr[len++] = elem;
+        return len - 1;
+    }
+
+    void append_items(const T* items, size_t count) {
+        for (int i = 0; i < count; i++) {
+            append(items[i]);
+        }
+    }
+
+    constexpr void resize(usize new_len) {
+        ensure_capacity(new_len);
+        len = new_len;
+    }
+
+    bool empty() const { return ptr == nullptr or capacity == 0; }
+
+    const T& last() const {
+        assert(len >= 1);
+        return ptr[len - 1];
+    }
+
+    T& last() {
+        assert(len >= 1);
+        return ptr[len - 1];
+    }
+
+    T* begin() { return ptr; }
+    T* end() { return ptr + len; }
+
+    T& back() { return ptr[len - 1]; }
+
+    T& at(usize i) const {
+        assert(i < len && "access beyond the lenght of the array");
+        return ptr[i];
+    }
+
+    T& at(usize i) {
+        assert(i < len && "access beyond the lenght of the array");
+        return ptr[i];
+    }
+
+    T& operator[](usize i) const { return ptr[i]; }
+
+    T& operator[](usize i) { return ptr[i]; }
 };
+
+struct Arena : Allocator {
+    RawArray<u8*> blocks = {};
+    usize offset = 0;
+    usize block_size = 2 * 1024 * 1024;
+    ~Arena() {
+        if (!blocks.empty()) { deinit(); }
+    }
+    Arena() {
+        blocks.ensure_capacity(256);
+        u8* _mem = (u8*)calloc(block_size, sizeof(u8));
+        blocks.append(_mem);
+    }
+
+    Arena(usize _block_size) {
+        block_size = _block_size;
+        u8* _mem = (u8*)calloc(block_size, sizeof(u8));
+        blocks.append(_mem);
+    }
+
+    void dealloc(void* ptr) override { (void)ptr; }
+    void deinit() override {
+        for (auto blk : blocks) {
+            free(blk);
+        }
+        blocks.destroy();
+    }
+
+    void* alloc(usize size) override {
+        // size = (size + alignof(u8) - 1) & ~(alignof(u8) - 1); // align to 8 bytes
+        if (size > block_size - offset) { // no enough space in this block
+            u8* _mem = (u8*)calloc(block_size, sizeof(u8));
+            blocks.append(_mem);
+            offset = 0;
+        }
+        void* ptr = blocks.back() + offset; // current_block + offset
+        offset += size;
+        return ptr;
+    }
+
+    template <typename Tp> Tp* alloc(usize nelems = 1) { return (Tp*)alloc(sizeof(Tp) * nelems); }
+    template <typename Tp> Tp* alloc(Tp item) {
+        auto res = (Tp*)alloc(sizeof(Tp));
+        *res = item;
+        return res;
+    }
+};
+
+static Arena global_arena{16 * 1024};
 
 template <typename T> auto create_dyn(usize _size = 8) {
     DynArray<T> l = {};
@@ -565,12 +741,15 @@ template <typename T> auto create_dyn(usize _size = 8) {
     return l;
 }
 
+static Arena StringBuffer = {256 * 1024};
+
 struct String {
     char* ptr = nullptr;
     u32 len = 0;
     u32 capacity = 0;
 
     String() {}
+    String(const char* __str, usize n) { append(__str, n); }
     String(const char* __str) { append(__str); }
     String(char* __str) { append(__str); }
 
@@ -581,9 +760,14 @@ struct String {
         return res;
     }
 
+    String copy() {
+        String s;
+        s.append(ptr, len);
+        return s;
+    }
+
     void ensure_capacity(usize new_capacity = 16) {
-        if (capacity >= new_capacity)
-            return;
+        if (capacity >= new_capacity) return;
         usize better_capacity = capacity;
 
         do {
@@ -607,19 +791,18 @@ struct String {
     }
 
     void destroy() {
-        free(ptr);
+        if (ptr) { free(ptr); }
+        ptr = nullptr;
         len = capacity = 0;
     }
 
     constexpr bool enough_space_for(u32 n_items) const {
-        if ((capacity - len) >= n_items)
-            return true;
+        if ((capacity - len) >= n_items) return true;
         return false;
     }
     u32 append(StringRef items) {
         auto n = items.size();
-        if (!enough_space_for(n))
-            ensure_capacity(len + n + 1);
+        if (!enough_space_for(n)) ensure_capacity(len + n + 1);
 
         memcpy(&ptr[len], items.data(), n);
         len += n;
@@ -633,8 +816,7 @@ struct String {
     }
 
     u32 append(char* items, usize n) {
-        if (!enough_space_for(n + 1))
-            ensure_capacity(len + n + 1);
+        if (!enough_space_for(n + 1)) ensure_capacity(len + n + 1);
 
         memcpy(&ptr[len], items, n);
         len += n;
@@ -644,8 +826,7 @@ struct String {
 
     u32 append(const char* items) {
         auto n = strlen(items);
-        if (!enough_space_for(n + 1))
-            ensure_capacity(len + n + 1);
+        if (!enough_space_for(n + 1)) ensure_capacity(len + n + 1);
 
         memcpy(&ptr[len], items, n);
         len += n;
@@ -654,8 +835,7 @@ struct String {
     }
 
     u32 append(const char* items, usize n) {
-        if (!enough_space_for(n + 1))
-            ensure_capacity(len + n + 1);
+        if (!enough_space_for(n + 1)) ensure_capacity(len + n + 1);
 
         memcpy((char*)&ptr[len], items, n);
         len += n;
@@ -665,8 +845,7 @@ struct String {
 
     // len =0 append('a'), ptr[len] = 'a' , len = 1 ptr[1] = '\0' ,return len - 1
     u32 append(char elem) {
-        if (capacity <= len + 1)
-            ensure_capacity(len + 1);
+        if (capacity <= len + 1) ensure_capacity(len + 1);
         ptr[len++] = elem;
         ptr[len] = '\0';
         return len - 1;
@@ -724,21 +903,18 @@ template <typename T, usize FixedSize> struct StaticArray {
     }
 
     constexpr bool enough_space_for(u32 n_items) const {
-        if ((capacity - len) >= n_items)
-            return true;
+        if ((capacity - len) >= n_items) return true;
         return false;
     }
 
     constexpr u32 append(T* items, usize n) {
-        if (!enough_space_for(n))
-            ensure_capacity(len + n + 1);
+        if (!enough_space_for(n)) ensure_capacity(len + n + 1);
 
         memcpy(&items[len], items, n);
     }
 
     constexpr u32 append(T elem) {
-        if (capacity <= len + 1)
-            ensure_capacity(len + 1);
+        if (capacity <= len + 1) ensure_capacity(len + 1);
         items[len++] = elem;
         return len - 1;
     }
@@ -792,32 +968,6 @@ template <typename T> struct Span {
     }
 };
 
-struct Arena {
-    u8* bytes = nullptr;
-    u8* current = nullptr;
-    usize capacity = 0;
-
-    template <typename T, usize Size = sizeof(T)> T* alloc(usize elements) {
-        if (current >= (bytes + capacity)) {
-            fprintf(stderr,
-                    "[Arena Error]: arena allocation exceded allocated memory -256KB- for the arena\n");
-            fprintf(stderr, "               to avoid use after free error or heap overflow increase the\n");
-            fprintf(stderr, "               arena initial capacity or create a new arena.\n");
-            exit(1);
-        }
-        auto _cur = current;
-        current += (Size * elements);
-        return (T*)_cur;
-    }
-
-    void deinit() {
-        if (bytes != nullptr) {
-            free(bytes);
-            current = nullptr;
-        }
-    }
-};
-
 enum class Ok : u8 {
     NullOpt,
     ErrorResult,
@@ -830,16 +980,21 @@ template <typename T> struct [[nodiscard]] Option {
     bool checked = false;
 
   public:
+    ~Option() {
+        if (_M_value) free(_M_value);
+        _M_value = nullptr;
+        checked = false;
+    }
     Option() = default;
 
     Option(std::nullptr_t n) { (void)n; }
     Option(T _value) {
-        _M_value = temp_alloc(T, 1);
+        _M_value = (T*)malloc(sizeof(T));
         *_M_value = _value;
     }
 
     Option<T>& set(T _value) {
-        _M_value = temp_alloc(T, 1);
+        _M_value = (T*)malloc(sizeof(T));
         *_M_value = _value;
         return *this;
     }
@@ -848,8 +1003,7 @@ template <typename T> struct [[nodiscard]] Option {
     T unwrap_or(T _value) { return _M_value != nullptr ? *_M_value : _value; }
 
     T unwrap() const {
-        if (_M_value != nullptr)
-            return *_M_value;
+        if (_M_value != nullptr) return *_M_value;
 
         if (!checked) {
             fprintf(stderr, "[panic]: Optional value unchcked\n");
@@ -873,7 +1027,7 @@ template <typename T> struct ErrorUnion {
     ErrorUnion() = default;
     ErrorUnion(Error __error) : error(__error) {}
     ErrorUnion(T _value) {
-        _M_value = temp_alloc(T, 1);
+        _M_value = (T*)malloc(sizeof(T));
         *_M_value = _value;
     }
 
@@ -893,9 +1047,7 @@ template <typename T> struct [[nodiscard]] Result : ErrorUnion<T> {
 
   public:
     constexpr T& unwrap() const {
-        if (valid) {
-            return *this->_M_value;
-        }
+        if (valid) { return *this->_M_value; }
         fprintf(stderr, "[panic: Result<T>]: %s at (%s:%d) `%s`\n", error_name(), __FILE_NAME__, __LINE__,
                 __PRETTY_FUNCTION__);
         exit(1);
@@ -904,24 +1056,20 @@ template <typename T> struct [[nodiscard]] Result : ErrorUnion<T> {
     constexpr operator bool() const { return valid; }
 
     constexpr operator T() const {
-        if (!valid)
-            unwrap();
+        if (!valid) unwrap();
 
         return *this->_M_value;
     }
 
     // ok() and value() are used for the Some macro
     constexpr Ok ok() const {
-        if (!valid)
-            return Ok::ErrorResult;
+        if (!valid) return Ok::ErrorResult;
 
         return Ok::Done;
     }
 
     constexpr const char* error_name() const {
-        if (!valid) {
-            return this->error.name;
-        }
+        if (!valid) { return this->error.name; }
         return nullptr;
     }
 
@@ -938,28 +1086,24 @@ template <typename Fn> struct DeferGuard {
 // 1. Open the std namespace to specialize the formatter
 
 struct File {
-    const char* name;
-    const char* content;
+    const char* name = nullptr;
+    const char* content = nullptr;
 
     const char& operator[](usize _index) const { return content[_index]; }
+    void deinit() { free((void*)content); }
 };
 
 constexpr File create_file(const char* name, const char* content) {
     File f;
     f.name = name;
     auto contlen = strlen(content);
-    f.content = temp_alloc(char, contlen + 1);
+    f.content = (char*)malloc(sizeof(char) * contlen + 1);
     memcpy((char*)f.content, content, contlen);
     return f;
 }
 
-constexpr Arena create_arena(usize initial_size = ARENA_INIT_MEMORY) {
-    auto a = Arena{
-        .bytes = (u8*)calloc(initial_size, sizeof(u8)),
-        .current = 0,
-    };
-    a.current = a.bytes;
-    a.capacity = initial_size;
+constexpr Arena create_arena(usize block_size = ARENA_INIT_MEMORY) {
+    auto a = Arena{block_size};
     return a;
 }
 
@@ -983,7 +1127,7 @@ constexpr File read_file(const char* file_name) {
 
     File f = {};
     f.name = file_name;
-    f.content = c12malloc(char, fsize + 1);
+    f.content = (char*)calloc(fsize + 1, sizeof(char));
 
     size_t n = fread((char*)f.content, sizeof(char), fsize, fp);
 
