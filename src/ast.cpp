@@ -1,12 +1,13 @@
 #include "ast.h"
 #include "cortex.h"
 #include "lexer.h"
-
+#include <cassert>
+#include <cstdio>
+#include <stdio.h>
 
 Ast new_ast(File file) {
     Ast ast = {};
     auto lexer = Lexer::create(file, ast.tokens);
-    ast.arena = new_arena(64 * 1024);
     ast.toki = 0;
     ast.current = ast.tokens[0];
     ast.file_name = file.name;
@@ -51,6 +52,59 @@ const char* to_str(u64 type_kind) {
     case TYPE_BITS16:      return "16bit";
     case TYPE_BITS32:      return "32bit";
     case TYPE_BITS64:      return "64bit";
+    case TYPE_ARRAY:       return "Array";
+    case TYPE_POINTER:     return "Pointer";
     }
     return "Unknown";
 }
+
+void Node::deinit() {
+
+    switch (tag) {
+    case AST_BLOCK: {
+        for (auto s : block.stmts) {
+            s->deinit();
+        }
+        // block.stmts.destroy();
+        break;
+    }
+    case AST_CALL: {
+        for (auto s : call.args) {
+            s->deinit();
+        }
+        // call.args.destroy();
+        break;
+    }
+    case AST_IF: {
+        if_stmt.condition->deinit();
+        if_stmt.then_body->deinit();
+        if (if_stmt.else_body) if_stmt.else_body->deinit();
+        break;
+    }
+
+    case AST_ADD:
+    case AST_SUB:
+    case AST_MUL:
+    case AST_DIV:
+    case AST_MOD:
+    case AST_LT:
+    case AST_GT:
+    case AST_LT_EQ:
+    case AST_GT_EQ:
+    case AST_EQ_EQ:
+    case AST_NOT_EQ:
+    case AST_BOOL_AND:
+    case AST_BOOL_OR:
+    case AST_BIT_OR:
+    case AST_BIT_AND:
+    case AST_BIT_XOR:
+    case AST_SHL:
+    case AST_SHR:      {
+        binary.lhs->deinit();
+        binary.rhs->deinit();
+        break;
+    }
+    default: break;
+    }
+}
+

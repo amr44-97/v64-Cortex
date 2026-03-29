@@ -1,16 +1,10 @@
 #pragma once
 
 #include "cortex.h"
-#include "initializer_list.h"
 
-typedef u32 Index; // used as TokenIndex , NodeIndex, StringIndex
-typedef u32 NodeIndex;
 typedef u32 TokenIndex;
-typedef Index StringIndex;
-typedef Index TypeIndex;
-typedef Index Name;
 
-struct AstNode;
+typedef struct Node Node;
 struct Type;
 
 enum TypeKind : u64 {
@@ -62,15 +56,17 @@ const char* to_str(u64 type_kind);
 // TODO: add string interner in the Ast to replace StringRef
 
 struct Container {
-    DynArray<TypeIndex> fields;
     // TypeName member_name = value;
-    DynArray<NodeIndex> members; // in case of enums , should be a constant expression
+    DynArray<Type*> fields;
+
+    // in case of enums , should be a constant expression
+    DynArray<Node*> members;
 };
 
 // used for both arrays and pointers
 struct PtrType {
-    TypeIndex base;
-    NodeIndex len;
+    Type* base;
+    Node* len;
 };
 
 struct Type {
@@ -87,131 +83,138 @@ struct Type {
         PtrType array;
         void* none;
     };
+
+    const char* to_str() {
+        String s = "";
+        if (id == TYPE_ARRAY) {
+            s.append("Array<");
+            s.append(array.base->to_str());
+            s.append(">");
+        } else if (id == TYPE_POINTER) {
+            s.append("Pointer<");
+            s.append(ptr.base->to_str());
+            s.append(">");
+        } else {
+            return ::to_str(id);
+        }
+        return s.ptr;
+    }
 };
 
 // the Op is known by the AstKind
 struct BinaryExpr {
-    NodeIndex lhs;
-    NodeIndex rhs;
+    Node* lhs;
+    Node* rhs;
 };
 
 // the Op is known by the AstKind
 struct UnaryExpr {
-    NodeIndex expr;
+    Node* expr;
 };
 
 struct Member {
-    NodeIndex parent_expr;
-    NodeIndex field;
+    Node* parent_expr;
+    Node* field;
 
     // concatinate all the name from nodes separated by `.`
     const char* get_final_name();
 };
 
 struct FuncDeclArg {
-    Index name;
-    Index type;
+    Node* name;
+    Type* type;
 };
 
 struct Func {
     // index into a string list saved by the Ast
-    StringIndex name;
+    String name;
     // DynArray<Index> arg_name;
     // // index into a type list saved by the Ast
     // DynArray<Index> arg_types;
-    Span<Index> args;
+    DynArray<Node*> args;
     // a list of expressions, since they are optional
-    DynArray<NodeIndex>* default_values = nullptr;
+    DynArray<Node*>* default_values = nullptr;
 
     // can be 0 if the tag of kind is FuncDecl
-    NodeIndex body;
+    Node* body;
 };
 
 struct Block {
-    DynArray<NodeIndex> statements;
+    DynArray<Node*> stmts;
 };
 
 struct Return {
-    NodeIndex expr;
+    Node* expr;
 };
 
 struct VarDecl {
     StringRef name;
-    TypeIndex type;
-    NodeIndex init_expr;
+    Type* type;
+    Node* init_expr;
 };
 
 struct IfStmt {
-    NodeIndex condition;
-    NodeIndex then_body;
-    NodeIndex else_body;
-};
-
-struct WhileStmt {
-    NodeIndex condition;
-    NodeIndex body;
-    NodeIndex label;
+    Node* condition;
+    Node* then_body;
+    Node* else_body;
 };
 
 // for ([init]; [condition]; [step]) [body]
-struct ForStmt {
-    NodeIndex init;
-    NodeIndex condition;
-    NodeIndex step;
-    NodeIndex body;
+struct LoopStmt {
+    Node* label;
+    Node* init;
+    Node* condition;
+    Node* step; // payload
+    Node* body;
 };
 
 struct TypeAlias {
-    StringIndex alias;
-    StringIndex original_type;
+    String alias;
+    String original_type;
 };
 
 struct Call {
     // expr . ident
-    NodeIndex callee;
+    Node* callee;
     // list of expr
-    DynArray<NodeIndex> args;
+    DynArray<Node*> args;
     // for named arguments
     // TODO: Impel later
-    // DynArray<StringIndex> arg_names;
-};
-
-struct Identifier {
-    StringIndex name;
+    // DynArray<String> arg_names;
 };
 
 // expr[index]
 struct ArrayIndex {
-    NodeIndex ident; // array name
-    NodeIndex expr;  // index expr
+    Node* ident; // array name
+    Node* expr;  // index expr
 };
 // Arr[start..end]
 struct Slice {
-    NodeIndex expr;
-    NodeIndex start;
-    NodeIndex end;
+    Node* expr;
+    Node* start;
+    Node* end;
 };
 
 // (Type) expr
 struct Cast {
-    TypeIndex type; // cast to
-    NodeIndex expr;
+    Type* type; // cast to
+    Node* expr;
 };
 
 struct StructT {
-    StringIndex name;
-    DynArray<NodeIndex> fields;
+    String name;
+    DynArray<Node*> fields;
 };
 
 struct StructField {
-    StringIndex name;
-    TypeIndex type;
-    NodeIndex init_expr;
+    String name;
+    Type* type;
+    Node* init_expr;
 };
 
 struct Impl {
-    StringIndex struct_name;
-    DynArray<NodeIndex> methods;
+    String struct_name;
+    DynArray<Node*> methods;
 };
 
 // 1) #include stdio.*;
@@ -219,35 +222,34 @@ struct Impl {
 // for the standard library modules use Identifiers
 // for user modules use file paths
 struct Include {
-    TokenIndex path;
-    TokenIndex alias;
+    Token* path;
+    Token* alias;
     bool wildcard;
 };
 
 struct Defer {
-    NodeIndex stmt;
+    Node* stmt;
 };
 
 struct SizeOf {
-    NodeIndex expr;
+    Node* expr;
 };
 
 struct Decl {
     bool is_pub = true; // for now let's use static to make a decl private else it's public
                         // so we decls are public by default.
-    NodeIndex node;
+    Node* node;
 };
 
 struct Root {
-    DynArray<NodeIndex> children;
+    DynArray<Node*> children;
 };
 
 struct Node {
     AstTag tag;
     // instead of adding it to the union
-    TokenIndex main_token;
-    TypeIndex type = 0;
-
+    Token main_token;
+    Type* type = nullptr;
     // we can traverse the children nodes to get the exact range of locs
     // literals values are contained within the Token
     union { /* data */
@@ -259,11 +261,11 @@ struct Node {
         UnaryExpr unary;
         BinaryExpr binary;
         ArrayIndex array_access;
-        NodeIndex grouped; // for grouped expr
+        Node* grouped; // for grouped expr
         VarDecl var;
         IfStmt if_stmt;
-        WhileStmt while_stmt;
-        ForStmt for_stmt;
+        LoopStmt while_stmt;
+        LoopStmt for_stmt;
         Impl impl;
 
         StructT struct_decl;
@@ -271,6 +273,8 @@ struct Node {
         Include include;
         Defer defer;
     };
+
+    void deinit();
 };
 
 // location of an AstNode like Token's Location
@@ -283,18 +287,24 @@ struct Ast {
     const char* file_name;
     StringRef source;       // the file from which we are producing this Ast
     DynArray<Token> tokens; // uses realloc not the Ast arena
-    DynArray<Node> nodes;
-    DynArray<Node> extra;
-    DynArray<Type> types;
-    DynArray<StringRef> identifiers;
     Token current;
-    Arena arena;
+    Arena arena{256 * 1024};
+    DynArray<Node> node_pool{&arena};
+    DynArray<Type> type_pool{&arena};
     u32 toki; // current token index
 
+    Ast() {
+        // node_pool.allocator = &arena;
+        // type_pool.allocator = &arena;
+    }
     void deinit() {
         tokens.destroy();
-        nodes.destroy();
         arena.deinit();
+        // for (auto n : node_pool) {
+        //     n.deinit();
+        // }
+        // node_pool.destroy();
+        // type_pool.destroy();
     }
 
     void set_current_token() { current = tokens[toki]; }
@@ -303,15 +313,12 @@ struct Ast {
         current = tokens[toki];
     }
 
-    Token token_of(NodeIndex node) { return tokens[nodes[node].main_token]; }
     // just explicit
     void skip_token(TokenTag k) {
         assert(tokens[toki].tag == k);
         toki++;
         current = tokens[toki];
     }
-
-    template <typename T> T* alloc(usize nelems = 1) { return arena.alloc<T>(nelems); }
 
     void advance(u32 i = 1) {
         toki += i;
@@ -322,12 +329,10 @@ struct Ast {
         const auto begin = items.begin();
         const auto size = items.size();
 
-        if (tokens.len - toki < size)
-            return false;
+        if (tokens.len - toki < size) return false;
 
         for (usize i = 0; i < size; i++) {
-            if (begin[i] != tokens[toki + i].tag)
-                return false;
+            if (begin[i] != tokens[toki + i].tag) return false;
         }
 
         return true;
@@ -337,16 +342,33 @@ struct Ast {
         const auto begin = items.begin();
         const auto size = items.size();
 
-        if (tokens.len - toki < size)
-            return false;
+        if (tokens.len - toki < size) return false;
 
         for (usize i = 0; i < size; i++) {
-            if (begin[i] != tokens[toki + i].tag)
-                return false;
+            if (begin[i] != tokens[toki + i].tag) return false;
         }
         toki += size;
         current = tokens[toki];
         return true;
+    }
+    Node* new_node() {
+        auto idx = node_pool.append(Node{});
+        return &node_pool.ptr[idx];
+    }
+
+    Type* new_type() {
+        auto idx = type_pool.append(Type{});
+        return &type_pool.ptr[idx];
+    }
+
+    Type* new_type(Type t) {
+        auto idx = type_pool.append(t);
+        return &type_pool.ptr[idx];
+    }
+
+    Node* new_node(Node n) {
+        auto idx = node_pool.append(n);
+        return &node_pool.ptr[idx];
     }
 
     Token get_token(i32 offset = 0) { return tokens[toki + offset]; }
@@ -356,24 +378,29 @@ struct Ast {
 };
 
 Ast new_ast(File source);
-Option<TokenIndex> eat_token(Ast&, TokenTag);
-TokenIndex expect_token(Ast&, TokenTag);
-TokenIndex next_token(Ast&);
+Option<Token> eat_token(Ast&, TokenTag);
+Token& expect_token(Ast&, TokenTag);
+Token& next_token(Ast&);
 
-TypeIndex parse_base_type(Ast& ast);
-NodeIndex parse(Ast&); // the entry point
-NodeIndex primary(Ast&);
-NodeIndex parse_unary(Ast&);
-NodeIndex parse_precedence(Ast&, int);
-NodeIndex parse_expr(Ast&);
-NodeIndex parse_include(Ast&);
-NodeIndex parse_struct_field(Ast&);
-NodeIndex parse_struct(Ast&);
-NodeIndex parse_enum(Ast&);
-NodeIndex parse_union(Ast&);
-
-NodeIndex parse_fn_param(Ast&);
-NodeIndex parse_fn_proto(Ast&);
-NodeIndex parse_fn_def(Ast&);
-NodeIndex parse_var_decl(Ast&);
-TypeIndex parse_type_expr(Ast&);
+Type* parse_base_type(Ast& ast);
+Node* parse(Ast&); // the entry point
+Node* primary(Ast&);
+Node* parse_unary(Ast&);
+Node* parse_precedence(Ast&, int);
+Node* parse_expr(Ast&);
+Node* parse_stmt(Ast&);
+Node* parse_block(Ast&);
+Node* parse_include(Ast&);
+Node* parse_struct_field(Ast&);
+Node* parse_struct(Ast&);
+Node* parse_enum(Ast&);
+Node* parse_union(Ast&);
+Node* parse_for(Ast&);
+Node* parse_if(Ast&);
+Node* parse_while(Ast&);
+Node* parse_switch(Ast&);
+Node* parse_fn_param(Ast&);
+Node* parse_fn_proto(Ast&);
+Node* parse_fn_def(Ast&);
+Node* parse_var_decl(Ast&);
+Type* parse_type_expr(Ast&);
