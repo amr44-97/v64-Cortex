@@ -1,11 +1,12 @@
 #include "lexer.h"
 #include "cortex.h"
 #include <unordered_map>
+
 // assumes __string_ref_v is of type StringRef
 #define copy_and_nullterm(__string_ref_v)                                                                    \
     ({                                                                                                       \
         auto buflen = __string_ref_v.size();                                                                 \
-        auto __buf = temp_alloc(char, buflen + 1);                                                           \
+        auto __buf = (char*)global_arena.alloc(buflen + 1);                                                           \
         memcpy(__buf, __string_ref_v.data(), buflen);                                                        \
         __buf[buflen] = '\0';                                                                                \
         __buf;                                                                                               \
