@@ -1,1 +1,12 @@
-int ptr = Hello[12] + Hello(.a).Name;
+{ 
+   if(true) {qw;} 
+   else {
+        1223;
+        printf("Hello World1",1212);
+   }
+
+   while(true){
+        printf("Hadsalkmlmlkqmwoiqj");
+   }   
+   exit(1);
+}
