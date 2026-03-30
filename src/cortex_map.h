@@ -19,11 +19,11 @@ template <typename T, typename V> struct Pair {
     V value;
 };
 
-template <typename T> struct StringMap {
+template <typename T, typename Key = String> struct StringMap {
     enum class State : u32 { Empty = 0, Occupied, Tombstone };
 
     struct Entry {
-        String key = {};
+        Key key = {};
         T val{};
         State state = State::Empty;
     };
@@ -32,14 +32,14 @@ template <typename T> struct StringMap {
     int used = 0;
 
     StringMap() {}
-    StringMap(std::initializer_list<Pair<String, T>> list) {
+    StringMap(std::initializer_list<Pair<Key, T>> list) {
         for (auto i : list) {
             put(i.key, i.value);
         }
     }
 
   private:
-    static u64 fnv_hash(String s) {
+    static u64 fnv_hash(Key s) {
         u64 hash = 0xcbf29ce484222325;
         for (u64 i = 0; i < s.length(); i++) {
             hash *= 0x100000001b3;
@@ -93,7 +93,7 @@ template <typename T> struct StringMap {
   public:
     void destroy() { this->buckets.destroy(); }
 
-    Entry* get_or_insert_entry(String key) {
+    Entry* get_or_insert_entry(Key key) {
         if (buckets.empty() || (used * 100) / buckets.capacity >= HIGH_WATERMARK) rehash();
 
         auto hash = fnv_hash(key);
@@ -131,7 +131,7 @@ template <typename T> struct StringMap {
         exit(1);
     }
 
-    Entry* get_entry(String key) {
+    Entry* get_entry(Key key) {
         if (buckets.empty()) return nullptr;
         auto hash = fnv_hash(key);
         for (auto i = 0; i < buckets.capacity; ++i) {
@@ -142,17 +142,17 @@ template <typename T> struct StringMap {
         return nullptr;
     }
 
-    Option<T> get(String key) {
+    Option<T> get(Key key) {
         auto ent = get_entry(key);
         return ent ? Some(ent->val) : nullptr;
     }
 
-    void put(String key, const T& val) {
+    void put(Key key, const T& val) {
         auto ent = get_or_insert_entry(key);
         ent->val = val;
     }
 
-    void remove(String key) {
+    void remove(Key key) {
         auto ent = get_entry(key);
         if (ent) ent->state = State::Tombstone;
     }
