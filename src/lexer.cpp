@@ -1,18 +1,18 @@
 #include "lexer.h"
 #include "cortex.h"
-#include <unordered_map>
+#include "cortex_map.h"
 
 // assumes __string_ref_v is of type StringRef
 #define copy_and_nullterm(__string_ref_v)                                                                    \
     ({                                                                                                       \
         auto buflen = __string_ref_v.size();                                                                 \
-        auto __buf = (char*)global_arena.alloc(buflen + 1);                                                           \
+        auto __buf = (char*)global_arena.alloc(buflen + 1);                                                  \
         memcpy(__buf, __string_ref_v.data(), buflen);                                                        \
         __buf[buflen] = '\0';                                                                                \
         __buf;                                                                                               \
     })
 
-std::unordered_map<StringRef, TokenTag> map = {
+StringMap<TokenTag, CortexStr> cortex_map = {
     {"return", TOK_RETURN},   {"const", TOK_CONST},     {"let", TOK_LET},
     {"static", TOK_STATIC},   {"if", TOK_IF},           {"else", TOK_ELSE},
     {"for", TOK_FOR},         {"while", TOK_WHILE},     {"do", TOK_DO},
@@ -29,6 +29,24 @@ std::unordered_map<StringRef, TokenTag> map = {
     {"i64", TOK_I64},         {"f32", TOK_F32},         {"f64", TOK_F64},
     {"include", TOK_INCLUDE},
 };
+
+// std::unordered_map<StringRef, TokenTag> map = {
+//     {"return", TOK_RETURN},   {"const", TOK_CONST},     {"let", TOK_LET},
+//     {"static", TOK_STATIC},   {"if", TOK_IF},           {"else", TOK_ELSE},
+//     {"for", TOK_FOR},         {"while", TOK_WHILE},     {"do", TOK_DO},
+//     {"goto", TOK_GOTO},       {"switch", TOK_SWITCH},   {"case", TOK_CASE},
+//     {"break", TOK_BREAK},     {"default", TOK_DEFAULT}, {"struct", TOK_STRUCT},
+//     {"enum", TOK_ENUM},       {"union", TOK_UNION},     {"typedef", TOK_TYPEDEF},
+//     {"sizeof", TOK_SIZEOF},   {"signed", TOK_SIGNED},   {"unsigned", TOK_UNSIGNED},
+//     {"void", TOK_VOID},       {"int", TOK_INT},         {"bool", TOK_BOOL},
+//     {"char", TOK_CHAR},       {"short", TOK_SHORT},     {"long", TOK_LONG},
+//     {"float", TOK_FLOAT},     {"double", TOK_DOUBLE},   {"true", TOK_TRUE},
+//     {"false", TOK_FALSE},     {"null", TOK_NULL},       {"u8", TOK_U8},
+//     {"i8", TOK_I8},           {"u16", TOK_U16},         {"i16", TOK_I16},
+//     {"u32", TOK_U32},         {"i32", TOK_I32},         {"u64", TOK_U64},
+//     {"i64", TOK_I64},         {"f32", TOK_F32},         {"f64", TOK_F64},
+//     {"include", TOK_INCLUDE},
+// };
 
 void skip_whitespace(Lexer& self) {
     char c = self.source[self.pos];
@@ -60,8 +78,7 @@ slice<char> line_of(Lexer& self, Token* t = nullptr) {
 
     u32 line_start = ({
         u32 res = self.line_start;
-        if (t != nullptr)
-            res = t->loc.line_start;
+        if (t != nullptr) res = t->loc.line_start;
         res;
     });
 
@@ -90,10 +107,10 @@ Token identifier(Lexer& self) {
         case '_':         self.nextChar(); break;
         default:
             auto buf = std::string_view(&self.source[start], self.pos - start);
+            auto cortex_buf = CortexStr(&self.source[start], self.pos - start);
             auto kind = TOK_IDENTIFIER;
-            if (auto iter = map.find(buf); iter != map.end()) {
-                kind = iter->second;
-            }
+            // if (auto iter = map.find(buf); iter != map.end()) { kind = iter->second; }
+            kind = cortex_map.get(cortex_buf).unwrap_or(TOK_IDENTIFIER);
             return new_token(self, kind, StringRef(buf.data(), buf.size()), start, self.pos);
         }
     }
@@ -170,9 +187,7 @@ Token next_token(Lexer& self) {
     using enum TokenTag;
     self.lexing_start = self.pos;
 
-    if (self.pos >= self.buflen) {
-        return new_token(self, TOK_EOF, "", self.pos, self.pos);
-    }
+    if (self.pos >= self.buflen) { return new_token(self, TOK_EOF, "", self.pos, self.pos); }
     switch (self.source[self.pos]) {
 
     case '\0':        return new_token(self, TOK_EOF, "", self.pos, self.pos);
