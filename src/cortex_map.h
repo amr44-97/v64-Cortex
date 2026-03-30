@@ -23,8 +23,8 @@ template <typename T> struct StringMap {
     enum class State : u32 { Empty = 0, Occupied, Tombstone };
 
     struct Entry {
-        StringRef key = {};
-        T val;
+        String key = {};
+        T val{};
         State state = State::Empty;
     };
 
@@ -32,11 +32,16 @@ template <typename T> struct StringMap {
     int used = 0;
 
     StringMap() {}
+    StringMap(std::initializer_list<Pair<String, T>> list) {
+        for (auto i : list) {
+            put(i.key, i.value);
+        }
+    }
 
   private:
-    static u64 fnv_hash(StringRef s) {
+    static u64 fnv_hash(String s) {
         u64 hash = 0xcbf29ce484222325;
-        for (u64 i = 0; i < s.len; i++) {
+        for (u64 i = 0; i < s.length(); i++) {
             hash *= 0x100000001b3;
             hash ^= (u8)s[i];
         }
@@ -46,30 +51,33 @@ template <typename T> struct StringMap {
     auto rehash() {
         // Compute the size of the new hashmap.
         int nkeys = 0;
-        for (const auto& entry : buckets) {
-            if (entry.state == State::Occupied)
-                nkeys++;
+        for (usize i = 0; i < buckets.capacity; ++i) {
+            if (buckets[i].state == State::Occupied) nkeys++;
         }
 
-        int cap = buckets.capacity;
+        u32 cap = buckets.capacity == 0 ? INIT_SIZE : buckets.capacity;
 
         while ((nkeys * 100) / cap >= LOW_WATERMARK) {
             cap = cap * 2;
         }
+
         assert(cap > 0);
 
         // shooting myself in the foot
-        DynArray<Entry> new_bucks = new_dyn(Entry, cap);
+        DynArray<Entry> new_bucks(buckets.allocator);
+        new_bucks.ensure_capacity(cap);
+        // initialize all entries to Empty
+        for (u32 i = 0; i < cap; ++i)
+            new_bucks.append(Entry{});
 
-        for (const auto& old : buckets) {
+        for (usize i = 0; i < buckets.capacity; ++i) {
+            auto& old = buckets[i];
             if (old.state == State::Occupied) {
                 auto hash = fnv_hash(old.key);
                 for (auto i = 0; i < new_bucks.capacity; ++i) {
                     auto pos = (hash + i) % new_bucks.capacity;
                     if (new_bucks[pos].state == State::Empty) {
-                        new_bucks[pos].key = old.key;
-                        new_bucks[pos].val = old.val;
-                        new_bucks[pos].state = State::Occupied;
+                        new_bucks[pos] = old;
                         break;
                     }
                 }
@@ -77,40 +85,45 @@ template <typename T> struct StringMap {
         }
 
         // buckets = new_bucks.move();
-        buckets.ptr = new_bucks.ptr;
-        buckets.capacity = new_bucks.capacity;
-        buckets.len = new_bucks.len;
-
+        buckets.destroy();
+        buckets = new_bucks.move();
         used = nkeys;
     }
 
   public:
     void destroy() { this->buckets.destroy(); }
 
-    Entry* get_or_insert_entry(StringRef key) {
-        if (buckets.empty()) {
-            buckets.ensure_capacity(INIT_SIZE);
-        } else if ((used * 100) / buckets.capacity >= HIGH_WATERMARK) {
-            rehash();
-        }
+    Entry* get_or_insert_entry(String key) {
+        if (buckets.empty() || (used * 100) / buckets.capacity >= HIGH_WATERMARK) rehash();
 
         auto hash = fnv_hash(key);
+        Entry* first_tombstone = nullptr;
+
         for (auto i = 0; i < buckets.capacity; ++i) {
             Entry& ent = buckets[(hash + i) % buckets.capacity];
-            if (ent.state == State::Occupied and ent.key == key)
-                return &ent;
+            if (ent.state == State::Occupied) {
+                if (ent.key == key) return &ent;
+                continue;
+            }
 
             if (ent.state == State::Tombstone) {
-                ent.key = key;
-                ent.state = State::Occupied;
-                return &ent;
+                if (!first_tombstone) first_tombstone = &ent;
+                continue;
+                // ent.key = key;
+                // ent.state = State::Occupied;
+                // return &ent;
             }
 
             if (ent.state == State::Empty) {
-                ent.key = key;
-                ent.state = State::Occupied;
+                // ent.key = key;
+                // ent.state = State::Occupied;
+                // used++;
+                // return &ent;
+                Entry* target = first_tombstone ? first_tombstone : &ent;
+                target->key = key;
+                target->state = State::Occupied;
                 used++;
-                return &ent;
+                return target;
             }
         }
 
@@ -118,34 +131,30 @@ template <typename T> struct StringMap {
         exit(1);
     }
 
-    Entry* get_entry(StringRef key) {
-        if (buckets.empty())
-            return nullptr;
+    Entry* get_entry(String key) {
+        if (buckets.empty()) return nullptr;
         auto hash = fnv_hash(key);
         for (auto i = 0; i < buckets.capacity; ++i) {
             Entry* ent = &buckets[(hash + i) % buckets.capacity];
-            if (ent->state == State::Occupied and ent->key == key)
-                return ent;
-            if (ent->state == State::Empty)
-                return nullptr;
+            if (ent->state == State::Occupied and ent->key == key) return ent;
+            if (ent->state == State::Empty) return nullptr;
         }
         return nullptr;
     }
 
-    Option<T> get(StringRef key) {
+    Option<T> get(String key) {
         auto ent = get_entry(key);
         return ent ? Some(ent->val) : nullptr;
     }
 
-    void put(StringRef key, const T& val) {
+    void put(String key, const T& val) {
         auto ent = get_or_insert_entry(key);
         ent->val = val;
     }
 
-    void remove(StringRef key) {
+    void remove(String key) {
         auto ent = get_entry(key);
-        if (ent)
-            ent->state = State::Tombstone;
+        if (ent) ent->state = State::Tombstone;
     }
 };
 #endif

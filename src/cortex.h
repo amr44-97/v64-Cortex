@@ -119,48 +119,45 @@ template <typename T> struct slice {
 using StringRef = std::string_view;
 #define FmtStrRef(SV) (int)(SV).size(), (SV).data()
 
-// struct CortexStringRef : slice<char> {
-//     StringRef() {}
-//     StringRef(slice<char>& __slice) {
-//         this->ptr = __slice.ptr;
-//         this->len = __slice.len;
-//     }
-//
-//     StringRef(const char* __str, usize len) {
-//         this->ptr = __str;
-//         this->len = len;
-//     }
-//
-//     StringRef(const char* __str) {
-//         this->ptr = __str;
-//         this->len = strlen(__str);
-//     }
-//
-//     // allocates the date it's pointing to
-//     char* dupe() const {
-//         char* _data = (char*)malloc(len + 1);
-//         memcpy(_data, ptr, len);
-//         _data[len] = '\0';
-//         return _data;
-//     }
-//
-//     StringRef substr(u64 start_pos, u64 len) { return StringRef(&ptr[start_pos], len); }
-//
-//     bool operator==(const char* _buf) const {
-//         if (!_buf)
-//             return len == 0;
-//         auto buflen = strlen(_buf);
-//         if (len != buflen)
-//             return false;
-//         return memcmp(_buf, ptr, buflen) == 0;
-//     }
-//
-//     bool operator==(StringRef _buf) const {
-//         if (len != _buf.len)
-//             return false;
-//         return memcmp(_buf.ptr, ptr, _buf.len) == 0;
-//     }
-// };
+struct CortexStr : slice<char> {
+    CortexStr() {}
+    CortexStr(slice<char>& __slice) {
+        this->ptr = __slice.ptr;
+        this->len = __slice.len;
+    }
+
+    CortexStr(const char* __str, usize len) {
+        this->ptr = __str;
+        this->len = len;
+    }
+
+    CortexStr(const char* __str) {
+        this->ptr = __str;
+        this->len = strlen(__str);
+    }
+
+    // allocates the date it's pointing to
+    char* dupe() const {
+        char* _data = (char*)malloc(len + 1);
+        memcpy(_data, ptr, len);
+        _data[len] = '\0';
+        return _data;
+    }
+
+    CortexStr substr(u64 start_pos, u64 len) { return CortexStr(&ptr[start_pos], len); }
+    usize length() const { return this->len; }
+    bool operator==(const char* _buf) const {
+        if (!_buf) return len == 0;
+        auto buflen = strlen(_buf);
+        if (len != buflen) return false;
+        return memcmp(_buf, ptr, buflen) == 0;
+    }
+
+    bool operator==(CortexStr _buf) const {
+        if (len != _buf.len) return false;
+        return memcmp(_buf.ptr, ptr, _buf.len) == 0;
+    }
+};
 
 enum TokenTag : u32 {
     TOK_EOF = 0,
@@ -569,9 +566,8 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     static_assert((Alignment & (Alignment - 1)) == 0, "Alignment must be a power of 2");
 
     DynArray() {}
-    
-	explicit DynArray(Allocator* _allocator) { this->allocator = _allocator; }
-	
+
+    explicit DynArray(Allocator* _allocator) { this->allocator = _allocator; }
 
     DynArray<T> move() {
         DynArray<T> res = *this;
@@ -612,7 +608,7 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     }
 
     void destroy() {
-        free(ptr);
+        allocator->dealloc(ptr);
         len = capacity = 0;
     }
 
@@ -870,7 +866,7 @@ struct String {
 
     char* begin() { return ptr; }
     char* end() { return ptr + len; }
-
+    usize length() const { return len; }
     char& at(usize i) const {
         assert(i < len && "access beyond the lenght of the array");
         return ptr[i];
@@ -884,6 +880,23 @@ struct String {
     char& operator[](usize i) const { return ptr[i]; }
 
     char& operator[](usize i) { return ptr[i]; }
+
+    bool operator==(const char* _buf) const {
+        if (!_buf) return len == 0;
+        auto buflen = strlen(_buf);
+        if (len != buflen) return false;
+        return memcmp(_buf, ptr, buflen) == 0;
+    }
+
+    bool operator==(String _buf) const {
+        if (len != _buf.len) return false;
+        return memcmp(_buf.ptr, ptr, _buf.len) == 0;
+    }
+
+    bool operator==(CortexStr& _buf) const {
+        if (len != _buf.len) return false;
+        return memcmp(_buf.ptr, ptr, _buf.len) == 0;
+    }
 };
 
 template <typename T, usize FixedSize> struct StaticArray {
