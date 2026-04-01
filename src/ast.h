@@ -1,11 +1,24 @@
 #pragma once
 
 #include "cortex.h"
+#include "cortex_map.h"
 
 typedef u32 TokenIndex;
 
-typedef struct Node Node;
+struct Node;
 struct Type;
+struct Symbol;
+struct Scope;
+struct Ast;
+
+enum SymbolTag {
+    SYMB_VAR = 1 << 0,
+    SYM_FUNC = 1 << 2,
+    SYM_STRUCT = 1 << 3,
+    SYM_ENUM = 1 << 4,
+    SYM_UNION = 1 << 5,
+    SYM_TYPE = SYM_STRUCT | SYM_ENUM | SYM_UNION,
+};
 
 enum TypeKind : u64 {
     TYPE_VOID = 1 << 0, // 1
@@ -27,6 +40,7 @@ enum TypeKind : u64 {
     TYPE_F64 = 1 << 16,
     TYPE_POINTER = 1 << 17,
     TYPE_ARRAY = 1 << 18,
+    TYPE_NAME = 1 << 19, // Unresolved type
     TYPE_I8 = TYPE_SIGNED | TYPE_BITS8,
     TYPE_U8 = TYPE_UNSIGNED | TYPE_BITS8,
 
@@ -94,10 +108,74 @@ struct Type {
             s.append("Pointer<");
             s.append(ptr.base->to_str());
             s.append(">");
+        } else if (id == TYPE_NAME) {
+            s.append(name);
         } else {
             return ::to_str(id);
         }
         return s.ptr;
+    }
+};
+
+struct Symbol {
+    SymbolTag tag;
+    String name;
+    Type* type;
+    Node* decl_node;
+};
+
+struct ISymbolTable {
+    virtual ~ISymbolTable() = default;
+
+    // Scope Management
+    virtual void enter_scope() = 0;
+    virtual void exit_scope() = 0;
+
+    // Symbol Management
+    virtual void declare(StringRef name, Symbol* sym) = 0;
+
+    // Looks up a symbol starting from the current scope, moving upwards
+    virtual Symbol* lookup(StringRef name) = 0;
+
+    // Optional: Only check the current immediate scope (useful to catch duplicate declarations like `int x;
+    // int x;`)
+    virtual Symbol* lookup_current_scope(StringRef name) = 0;
+};
+
+struct StackSymbolTable : ISymbolTable {
+    Stack<StringMap<Symbol*>> scopes;
+    
+	StackSymbolTable(Arena* arena) : scopes(arena) {
+        // Always push a global scope on initialization
+        enter_scope();
+    }
+
+    void enter_scope() override { scopes.append(StringMap<Symbol*>{}); }
+
+    void exit_scope() override {
+        // Destroy the deepest scope, dropping all its variables
+        if (scopes.len > 1) { // Prevent popping the global scope
+            scopes.pop();
+        }
+    }
+    void declare(StringRef name, Symbol* sym) override {
+        // Always declare in the most deeply nested scope
+        scopes.last().put(name, sym);
+    }
+
+    Symbol* lookup(StringRef name) override {
+        // Iterate backwards from innermost scope to global scope
+        for (int i = scopes.len - 1; i >= 0; --i) {
+            auto result = scopes[i].get(name);
+            if (result) { return result.unwrap(); }
+        }
+        return nullptr; // Not found in any active scope
+    }
+
+    Symbol* lookup_current_scope(StringRef name) override {
+        auto result = scopes.last().get(name);
+        if (result) return result.unwrap();
+        return nullptr;
     }
 };
 
@@ -184,11 +262,12 @@ struct Call {
 };
 
 // expr[index]
-struct ArrayIndex {
+struct ArrayAccess {
     Node* ident; // array name
     Node* expr;  // index expr
 };
-// Arr[start..end]
+
+// `Expr`[`start`..`end`]
 struct Slice {
     Node* expr;
     Node* start;
@@ -250,6 +329,7 @@ struct Node {
     // instead of adding it to the union
     Token main_token;
     Type* type = nullptr;
+
     // we can traverse the children nodes to get the exact range of locs
     // literals values are contained within the Token
     union { /* data */
@@ -260,7 +340,8 @@ struct Node {
         Block block;
         UnaryExpr unary;
         BinaryExpr binary;
-        ArrayIndex array_access;
+        ArrayAccess array_access;
+        Slice slice;
         Node* grouped; // for grouped expr
         VarDecl var;
         IfStmt if_stmt;
@@ -291,6 +372,7 @@ struct Ast {
     Arena arena{256 * 1024};
     DynArray<Node> node_pool{&arena};
     DynArray<Type> type_pool{&arena};
+    Scope* scope;
     u32 toki; // current token index
 
     Ast() {
@@ -307,6 +389,11 @@ struct Ast {
         // type_pool.destroy();
     }
 
+    void dump_tokens() {
+        for (auto tok : tokens) {
+            printf("%s -> `%.*s`\n", to_str(tok.tag), FmtStrRef(tok.buf));
+        }
+    }
     void set_current_token() { current = tokens[toki]; }
     void skip_token() {
         toki++;
@@ -378,9 +465,11 @@ struct Ast {
 };
 
 Ast new_ast(File source);
+void record_types(Ast&);
 Option<Token> eat_token(Ast&, TokenTag);
 Token& expect_token(Ast&, TokenTag);
 Token& next_token(Ast&);
+bool is_typename(TokenTag kind);
 
 Type* parse_base_type(Ast& ast);
 Node* parse(Ast&); // the entry point

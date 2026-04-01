@@ -2,8 +2,6 @@
 #include "cortex.h"
 #include "lexer.h"
 #include <cassert>
-#include <cstdio>
-#include <stdio.h>
 
 Ast new_ast(File file) {
     Ast ast = {};
@@ -54,6 +52,7 @@ const char* to_str(u64 type_kind) {
     case TYPE_BITS64:      return "64bit";
     case TYPE_ARRAY:       return "Array";
     case TYPE_POINTER:     return "Pointer";
+    case TYPE_NAME:        return "TypeName(Unresolved)";
     }
     return "Unknown";
 }
@@ -107,4 +106,3 @@ void Node::deinit() {
     default: break;
     }
 }
-
