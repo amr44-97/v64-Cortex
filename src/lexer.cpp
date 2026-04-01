@@ -61,7 +61,9 @@ Token new_token(Lexer& self, TokenTag kind, StringRef buf, u32 start, u32 end) {
 
 Token identifier(Lexer& self) {
     auto start = self.pos - 1;
-    static StringMap<TokenTag> keywords = {
+    // more of like a stack allocated hashmap , so to not bother with memory leak or memory allocation
+    // since using StringMap takes about 2KB of memory
+    static StaticHashMap<CortexStr, TokenTag, fnv_hash, 100> keywords = {
         {"return", TOK_RETURN},   {"const", TOK_CONST},     {"let", TOK_LET},
         {"static", TOK_STATIC},   {"if", TOK_IF},           {"else", TOK_ELSE},
         {"for", TOK_FOR},         {"while", TOK_WHILE},     {"do", TOK_DO},

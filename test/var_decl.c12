@@ -4,7 +4,6 @@
    u32 lets = "Jadsd";
    let x = 1232;
    
-   A* b;
    
    if(true) {qw;} 
    else {

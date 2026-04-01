@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
 
     Ast ast = new_ast(file);
     defer(ast.deinit());
-   // ast.dump_tokens();
+    // ast.dump_tokens();
 
     auto res = parse_block(ast); // declspec(ast)
     String prefix = "";
