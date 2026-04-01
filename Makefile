@@ -1,9 +1,9 @@
 CC = clang++
-CFLAGS_FAST = -std=c++26 -fno-exceptions  -Wall -Werror -Wno-c99-designator -Wno-unused-variable  -Wno-format
-CFLAGS_FAST_DEBUG = -std=c++26  -fno-exceptions -Wall -ggdb -fno-omit-frame-pointer -Wno-c99-designator -Wno-unused-variable  -Wno-format -D _GLIBCXX_DEBUG
+CFLAGS_FAST = -std=c++26 -O0 -fno-exceptions -Wall -Werror -Wno-c99-designator -Wno-unused-variable  -Wno-format
+CFLAGS_FAST_DEBUG = -std=c++26 -O0 -ggdb -Wall -fno-omit-frame-pointer -Wno-c99-designator -Wno-unused-variable  -Wno-format -D _GLIBCXX_DEBUG
 CFLAGS_DEBUG = -Wall -std=c++26 -O0 -ggdb -fsanitize=address -fno-omit-frame-pointer -D _GLIBCXX_DEBUG
 
-CFLAGS = $(CFLAGS_FAST)
+CFLAGS = $(CFLAGS_FAST_DEBUG)
 
 EXE = v64
 OUTPUT_DIR = bin

@@ -1,0 +1,8 @@
+# First Approach
+1- iterate over tokens and add type names to the symbol table
+2- in the same iteration if you can add function signatures add them
+3- keep unkknow types for the main parsing function to be resolved ,
+	because by then all container types will be already stored in the symbol table
+
+# Second Approach 
+1- add type signatures for container types while lexing

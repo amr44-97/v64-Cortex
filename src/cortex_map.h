@@ -1,4 +1,5 @@
 #pragma once
+#include <type_traits>
 #ifndef CORTEX_STRING_MAP_H
 #define CORTEX_STRING_MAP_H
 
@@ -19,11 +20,22 @@ template <typename T, typename V> struct Pair {
     V value;
 };
 
-template <typename T, typename Key = String> struct StringMap {
+template <typename Key> static u64 fnv_hash(Key s) {
+     static_assert(std::is_same_v<Key, String> || std::is_same_v<Key, CortexStr>);
+    u64 hash = 0xcbf29ce484222325;
+    for (u64 i = 0; i < s.length(); i++) {
+        hash *= 0x100000001b3;
+        hash ^= (u8)s[i];
+    }
+    return hash;
+}
+
+template <typename Key, typename T, u64 HashFn(Key s)> struct HashMap {
+
     enum class State : u32 { Empty = 0, Occupied, Tombstone };
 
     struct Entry {
-        Key key = {};
+        Key key{};
         T val{};
         State state = State::Empty;
     };
@@ -31,31 +43,24 @@ template <typename T, typename Key = String> struct StringMap {
     DynArray<Entry> buckets = {};
     int used = 0;
 
-    StringMap() {}
-    StringMap(std::initializer_list<Pair<Key, T>> list) {
+    HashMap() {}
+    HashMap(std::initializer_list<Pair<Key, T>> list) {
         for (auto i : list) {
             put(i.key, i.value);
         }
     }
 
   private:
-    static u64 fnv_hash(Key s) {
-        u64 hash = 0xcbf29ce484222325;
-        for (u64 i = 0; i < s.length(); i++) {
-            hash *= 0x100000001b3;
-            hash ^= (u8)s[i];
-        }
-        return hash;
-    }
-
     auto rehash() {
         // Compute the size of the new hashmap.
         int nkeys = 0;
         for (usize i = 0; i < buckets.capacity; ++i) {
             if (buckets[i].state == State::Occupied) nkeys++;
+            // nkeys += (buckets[i].state == State::Occupied);
         }
 
         u32 cap = buckets.capacity == 0 ? INIT_SIZE : buckets.capacity;
+        // u32 cap = (buckets.capacity == 0) * INIT_SIZE + buckets.capacity;
 
         while ((nkeys * 100) / cap >= LOW_WATERMARK) {
             cap = cap * 2;
@@ -63,17 +68,12 @@ template <typename T, typename Key = String> struct StringMap {
 
         assert(cap > 0);
 
-        // shooting myself in the foot
-        DynArray<Entry> new_bucks(buckets.allocator);
-        new_bucks.ensure_capacity(cap);
-        // initialize all entries to Empty
-        for (u32 i = 0; i < cap; ++i)
-            new_bucks.append(Entry{});
+        DynArray<Entry> new_bucks{buckets.allocator, cap};
 
         for (usize i = 0; i < buckets.capacity; ++i) {
             auto& old = buckets[i];
             if (old.state == State::Occupied) {
-                auto hash = fnv_hash(old.key);
+                auto hash = HashFn(old.key);
                 for (auto i = 0; i < new_bucks.capacity; ++i) {
                     auto pos = (hash + i) % new_bucks.capacity;
                     if (new_bucks[pos].state == State::Empty) {
@@ -91,12 +91,12 @@ template <typename T, typename Key = String> struct StringMap {
     }
 
   public:
-    void destroy() { this->buckets.destroy(); }
+    void deinit() { this->buckets.destroy(); }
 
     Entry* get_or_insert_entry(Key key) {
         if (buckets.empty() || (used * 100) / buckets.capacity >= HIGH_WATERMARK) rehash();
 
-        auto hash = fnv_hash(key);
+        auto hash = HashFn(key);
         Entry* first_tombstone = nullptr;
 
         for (auto i = 0; i < buckets.capacity; ++i) {
@@ -133,7 +133,7 @@ template <typename T, typename Key = String> struct StringMap {
 
     Entry* get_entry(Key key) {
         if (buckets.empty()) return nullptr;
-        auto hash = fnv_hash(key);
+        auto hash = HashFn(key);
         for (auto i = 0; i < buckets.capacity; ++i) {
             Entry* ent = &buckets[(hash + i) % buckets.capacity];
             if (ent->state == State::Occupied and ent->key == key) return ent;
@@ -157,4 +157,8 @@ template <typename T, typename Key = String> struct StringMap {
         if (ent) ent->state = State::Tombstone;
     }
 };
+
+template <typename T>
+using StringMap = HashMap<CortexStr, T, fnv_hash>;
+
 #endif

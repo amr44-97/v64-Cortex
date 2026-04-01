@@ -1,32 +1,23 @@
 #pragma once
 
 #include <assert.h>
-#include <cstdlib>
 #include <initializer_list>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <string_view>
 
-#ifndef ARENA_INIT_MEMORY
-#define ARENA_INIT_MEMORY 1024 * 256
-#endif
+typedef uint8_t u8;
+typedef int8_t i8;
+typedef uint16_t u16;
+typedef int16_t i16;
+typedef uint32_t u32;
+typedef int32_t i32;
+typedef uint64_t u64;
+typedef int64_t i64;
+typedef size_t usize;
 
-#ifndef TEMP_MEMORY
-#define TEMP_MEMORY 1024 * 256
-#endif
-
-#define temp_alloc(T, _size)                                                                                 \
-    ({                                                                                                       \
-        if (_size > TEMP_MEMORY) {                                                                           \
-            printf("[error]: using temp_alloc to allocate size=%lu more than TEMP_MEMORY=%lu at [%s:%d]\n",  \
-                   (unsigned long)_size, (unsigned long)TEMP_MEMORY, __FILE__, __LINE__);                    \
-            printf("         called from %s\n", __PRETTY_FUNCTION__);                                        \
-            exit(1);                                                                                         \
-        }                                                                                                    \
-        temp_allocator.alloc<T>(_size);                                                                      \
-    })
+constexpr size_t ARENA_DEFAULT_BLOCK_SIZE = 64 * 1024;
 
 #define __pp_concat(x, y) x##y
 #define __pp_defer_concat(x, y) __pp_concat(x, y)
@@ -52,26 +43,16 @@
 #define Some(VALUE) Option<decltype(VALUE)>(VALUE)
 #define None nullptr
 
-typedef uint8_t u8;
-typedef int8_t i8;
-typedef uint16_t u16;
-typedef int16_t i16;
-typedef uint32_t u32;
-typedef int32_t i32;
-typedef uint64_t u64;
-typedef int64_t i64;
-typedef size_t usize;
-
 template <typename T> struct slice {
     u64 len;
-    const T* ptr;
+    T* ptr;
 
     slice() = default;
 
-    slice(T* _Data, u32 _length) : len(_length), ptr(static_cast<const T*>(_Data)) {}
+    slice(T* _Data, u32 _length) : len(_length), ptr(_Data) {}
     slice(const T* _Data, u32 _length) {
         len = _length;
-        ptr = _Data;
+        ptr = const_cast<T*>(_Data);
     }
 
     u64 size() const { return len; }
@@ -94,21 +75,15 @@ template <typename T> struct slice {
     T* dupe() {
         // [Len][Data]
         u64* mem = (u64*)malloc(sizeof(u64) + len * sizeof(T));
-        mem = len;
+        *mem = len;
         mem += 1;
         memcpy(mem, ptr, len);
         return mem;
     }
-    T& operator[](usize i) const {
-        assert(i < len && "access beyond the lenght of the array");
-        return ptr[i];
-    }
 
-    T operator[](usize i) {
-        assert(i < len && "access beyond the lenght of the array");
+    T& operator[](usize i) const { return ptr[i]; }
 
-        return ptr[i];
-    }
+    T& operator[](usize i) { return ptr[i]; }
 
     bool operator==(slice<T>& _buf) const {
         if (len != _buf.len) return false;
@@ -116,23 +91,21 @@ template <typename T> struct slice {
     }
 };
 
-using StringRef = std::string_view;
-#define FmtStrRef(SV) (int)(SV).size(), (SV).data()
-
 struct CortexStr : slice<char> {
     CortexStr() {}
+
     CortexStr(slice<char>& __slice) {
         this->ptr = __slice.ptr;
         this->len = __slice.len;
     }
 
     CortexStr(const char* __str, usize len) {
-        this->ptr = __str;
+        this->ptr = const_cast<char*>(__str);
         this->len = len;
     }
 
     CortexStr(const char* __str) {
-        this->ptr = __str;
+        this->ptr = const_cast<char*>(__str);
         this->len = strlen(__str);
     }
 
@@ -143,9 +116,11 @@ struct CortexStr : slice<char> {
         _data[len] = '\0';
         return _data;
     }
-
+    const char* data() const { return ptr; }
     CortexStr substr(u64 start_pos, u64 len) { return CortexStr(&ptr[start_pos], len); }
+
     usize length() const { return this->len; }
+
     bool operator==(const char* _buf) const {
         if (!_buf) return len == 0;
         auto buflen = strlen(_buf);
@@ -159,9 +134,13 @@ struct CortexStr : slice<char> {
     }
 };
 
-enum TokenTag : u32 {
+using StringRef = CortexStr;
+#define FmtStrRef(SV) (int)(SV).size(), (SV).data()
+
+enum TokenTag : u64 {
     TOK_EOF = 0,
     TOK_IDENTIFIER,
+    TOK_TYPENAME,
     TOK_NUMBER_LITERAL,
     TOK_STRING_LITERAL,
     TOK_CHAR_LITERAL,
@@ -421,21 +400,20 @@ struct Location {
     u32 line;
     u32 line_start = 0;
 };
+union CortexValue {
+    // index of the Identifier in ParsingContext.str_list;
+    // get the symbol by ParsingContext.get(u32 id) -> string_view
+    void* none;                 // 8
+    i64 integer;                // 8
+    long double floating_point; // 8
+    bool boolean;
+};
 
 struct Token {
-    TokenTag tag;
-    StringRef buf;
-    Location loc;
-
-    union {
-        // index of the Identifier in ParsingContext.str_list;
-        // get the symbol by ParsingContext.get(u32 id) -> string_view
-        void* none;
-        i64 integer;
-        double floating_point;
-
-        bool boolean;
-    } value = {.none = nullptr};
+    TokenTag tag;  // 4
+    StringRef buf; // 16
+    Location loc;  // 16
+    CortexValue value = {.none = nullptr};
 };
 
 template <typename T, usize Alignment = alignof(T)> struct RawArray {
@@ -557,6 +535,23 @@ template <typename T, usize Alignment = alignof(T)> struct RawArray {
     T& operator[](usize i) { return ptr[i]; }
 };
 
+template <typename T> struct Stack : RawArray<T> {
+    Allocator* allocator = &c_allocator;
+
+    explicit Stack(Allocator* _allocator) { this->allocator = _allocator; }
+    explicit Stack(Allocator* _allocator, u32 _capacity) {
+        this->allocator = _allocator;
+        this->ensure_capacity(_capacity);
+    }
+
+    T& push(T item) { this->append(item); }
+    T& pop() {
+        auto& t = this->last();
+        this->len -= 1;
+        return t;
+    }
+};
+
 template <typename T, usize Alignment = alignof(T)> struct DynArray {
     T* ptr = nullptr;
     u32 len = 0;
@@ -568,6 +563,10 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     DynArray() {}
 
     explicit DynArray(Allocator* _allocator) { this->allocator = _allocator; }
+    explicit DynArray(Allocator* _allocator, u32 _capacity) {
+        this->allocator = _allocator;
+        ensure_capacity(_capacity);
+    }
 
     DynArray<T> move() {
         DynArray<T> res = *this;
@@ -649,7 +648,7 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
         ensure_capacity(new_len);
         len = new_len;
     }
-
+    void pop() {}
     bool empty() const { return ptr == nullptr or capacity == 0; }
 
     const T& last() const {
@@ -682,13 +681,17 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
     T& operator[](usize i) { return ptr[i]; }
 };
 
+using dynString = DynArray<char>;
+
 struct Arena : Allocator {
     RawArray<u8*> blocks = {};
     usize offset = 0;
-    usize block_size = 2 * 1024 * 1024;
+    usize block_size = ARENA_DEFAULT_BLOCK_SIZE;
+
     ~Arena() {
-        if (!blocks.empty()) { deinit(); }
+        if (!blocks.empty()) deinit();
     }
+
     Arena() {
         blocks.ensure_capacity(256);
         u8* _mem = (u8*)calloc(block_size, sizeof(u8));
@@ -729,7 +732,7 @@ struct Arena : Allocator {
     }
 };
 
-static Arena global_arena{16 * 1024};
+static Arena global_arena{};
 
 template <typename T> auto create_dyn(usize _size = 8) {
     DynArray<T> l = {};
@@ -737,14 +740,13 @@ template <typename T> auto create_dyn(usize _size = 8) {
     return l;
 }
 
-static Arena StringBuffer = {256 * 1024};
-
 struct String {
     char* ptr = nullptr;
     u32 len = 0;
     u32 capacity = 0;
 
     String() {}
+    String(CortexStr& __str) : String(__str.ptr, __str.len) {}
     String(const char* __str, usize n) { append(__str, n); }
     String(const char* __str) { append(__str); }
     String(char* __str) { append(__str); }
@@ -796,6 +798,16 @@ struct String {
         if ((capacity - len) >= n_items) return true;
         return false;
     }
+
+    u32 append(String items) {
+        auto n = items.size();
+        if (!enough_space_for(n)) ensure_capacity(len + n + 1);
+
+        memcpy(&ptr[len], items.data(), n);
+        len += n;
+        return len;
+    }
+
     u32 append(StringRef items) {
         auto n = items.size();
         if (!enough_space_for(n)) ensure_capacity(len + n + 1);
@@ -863,7 +875,8 @@ struct String {
         assert(len >= 1);
         return ptr[len - 1];
     }
-
+    usize size() const { return len; }
+    char* data() { return ptr; }
     char* begin() { return ptr; }
     char* end() { return ptr + len; }
     usize length() const { return len; }
@@ -1025,7 +1038,7 @@ template <typename T> struct [[nodiscard]] Option {
         }
         return *_M_value;
     }
-
+    operator bool() { return _M_value != nullptr; }
     bool operator==(void* p) { return (void*)_M_value == p; }
     bool operator==(Option<T> _v) { return *_M_value == _v; }
 };
@@ -1115,7 +1128,7 @@ constexpr File create_file(const char* name, const char* content) {
     return f;
 }
 
-constexpr Arena create_arena(usize block_size = ARENA_INIT_MEMORY) {
+constexpr Arena create_arena(usize block_size = ARENA_DEFAULT_BLOCK_SIZE) {
     auto a = Arena{block_size};
     return a;
 }
@@ -1152,11 +1165,10 @@ constexpr File read_file(const char* file_name) {
     return f;
 }
 
-using dynString = DynArray<char>;
-
 static constexpr const char* TokenKindNames[] = {
     [TOK_EOF] = "Eof",
     [TOK_IDENTIFIER] = "identifier",
+    [TOK_TYPENAME] = "typename",
     [TOK_NUMBER_LITERAL] = "number_literal",
     [TOK_STRING_LITERAL] = "string_literal",
     [TOK_CHAR_LITERAL] = "char_literal",
@@ -1326,5 +1338,5 @@ static constexpr const char* AstKindNames[] = {
     [AST_ALIAS_STMT] = "AliasStmt",
 };
 
-constexpr const char* to_str(AstTag kind) { return AstKindNames[static_cast<int>(kind)]; }
-constexpr const char* to_str(TokenTag kind) { return TokenKindNames[static_cast<int>(kind)]; }
+constexpr const char* to_str(AstTag _tag) { return AstKindNames[_tag]; }
+constexpr const char* to_str(TokenTag _tag) { return TokenKindNames[_tag]; }
