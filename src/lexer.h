@@ -1,5 +1,6 @@
 #pragma once
 #include "cortex.h"
+#include "cortex_map.h"
 
 struct Lexer;
 
@@ -10,6 +11,7 @@ struct Lexer {
     const char* source;
     usize buflen;
     DynArray<Token>& tokens;
+    StringMap<TokenTag> keywords = {};
 
     u32 pos = 0;
     u32 line = 1;
@@ -28,6 +30,7 @@ struct Lexer {
         col += 1;
         return pos;
     }
+
     static constexpr Lexer create(File file, DynArray<Token>& tokens) {
         Lexer l = Lexer{
             .current_file = file.name,
@@ -39,13 +42,13 @@ struct Lexer {
             .col = 1,
         };
 
+
         while (true) {
             auto tok = next_token(l);
-
-            if (tok.tag == TOK_EOF)
-                break;
+            if (tok.tag == TOK_EOF) break;
         }
 
+        l.keywords.deinit();
         return l;
     }
 };

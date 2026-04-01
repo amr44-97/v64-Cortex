@@ -1,0 +1,10 @@
+tok1 = Student
+struct Student {
+	tok2  = Info 
+	struct Info{
+		struct family_info{}
+		struct number{}
+	}
+	struct Id{}
+	struct class {}
+}

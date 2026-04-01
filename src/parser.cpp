@@ -1,6 +1,7 @@
 #include "ast.h"
 #include "cortex.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 bool is_typename(TokenTag kind) {
@@ -60,7 +61,7 @@ const char* line_of(Ast& ast, Token& tok) {
             printf("[error:]: expected token `%s` but found `%s : %.*s`\n", to_str(_kind),                   \
                    to_str(ast.current.tag), FmtStrRef(ast.current.buf));                                     \
             printf("        | %s:%d `%s`\n", __FILE_NAME__, __LINE__, __PRETTY_FUNCTION__);                  \
-            printf("        |%d: %s\n", ast.current.loc.line, line_of(ast, ast.current));                    \
+            printf("%8d| %s\n", ast.current.loc.line, line_of(ast, ast.current));                            \
             exit(1);                                                                                         \
         }                                                                                                    \
         next_token(ast);                                                                                     \
@@ -109,21 +110,19 @@ Node* new_binary(Ast& ast, AstTag tag, Token main_token, Node* lhs, Node* rhs) {
     return ast.new_node(Node{.tag = tag, .main_token = main_token, .binary = {.lhs = lhs, .rhs = rhs}});
 }
 
-#define expect_expr_tag(AST, TAG)                                                                            \
-    ({                                                                                                       \
-        auto start_tok = (AST).toki;                                                                         \
-        auto expr = parse_expr((AST));                                                                       \
-        if ((AST).nodes[expr].tag != (TAG) || expr == nullptr) {                                             \
-            auto token_buf = ((AST).tokens[(AST).nodes[expr].main_token].buf);                               \
-            printf("[error]: expected expr `%s` after %.*s but found `%s : %.*s`\n", to_str((TAG)),          \
-                   ast.tokens[start_tok].buf, to_str((AST).nodes[expr].tag), (int)token_buf.size(),          \
-                   token_buf.data());                                                                        \
-            auto line_of_error = line_of(ast, (AST).nodes[expr].main_token);                                 \
-            printf("        | %.*s\n", (int)line_of_error.size(), line_of_error.data());                     \
-            exit(1);                                                                                         \
-        }                                                                                                    \
-        expr;                                                                                                \
-    })
+Node* expect_expr_tag(Ast& ast, AstTag TAG) {
+    auto start_tok = ast.toki;
+    auto expr = parse_expr(ast);
+    if (expr->tag != (TAG) || expr == nullptr) {
+        auto token_buf = expr->main_token.buf;
+        printf("[error]: expected expr `%s` after %.*s but found `%s : %.*s`\n", to_str((TAG)),
+               FmtStrRef(ast.tokens[start_tok].buf), to_str(expr->tag), FmtStrRef(token_buf));
+        auto line_of_error = line_of(ast, expr->main_token);
+        printf("%8d| %s\n", expr->main_token.loc.line, line_of_error);
+        exit(1);
+    }
+    return expr;
+}
 
 #define expect_expr(AST)                                                                                     \
     ({                                                                                                       \
@@ -134,7 +133,7 @@ Node* new_binary(Ast& ast, AstTag tag, Token main_token, Node* lhs, Node* rhs) {
             printf("[error]: expected expr after %.*s but found `%s : %.*s`\n",                              \
                    FmtStrRef(ast.tokens[start_tok].buf), to_str(expr->tag), FmtStrRef(token_buf));           \
             auto line_of_error = line_of(ast, expr->main_token);                                             \
-            printf("        | %s\n", line_of_error);                                                         \
+            printf("%8d| %s\n", expr->main_token.loc.line, line_of_error);                                   \
             exit(1);                                                                                         \
         }                                                                                                    \
         expr;                                                                                                \
@@ -147,7 +146,7 @@ Node* new_binary(Ast& ast, AstTag tag, Token main_token, Node* lhs, Node* rhs) {
             printf("[error]: expected identifier after `%.*s.` but found `%s` `%.*s`\n",                     \
                    FmtStrRef(lhs->main_token.buf), to_str(ast.current.tag), FmtStrRef(ast.current.buf));     \
             auto line = line_of(ast, ast.current);                                                           \
-            printf("         | %s\n", line);                                                                 \
+            printf("%8d| %s\n", ast.current.loc.line, line);                                                 \
             nullptr;                                                                                         \
         }                                                                                                    \
         __primary_expr;                                                                                      \
@@ -414,48 +413,97 @@ Node* parse_precedence(Ast& ast, int min_prec) {
     return lhs;
 }
 
+u64 tag_to_primitive(Ast& ast, Token& tok) {
+    switch (tok.tag) {
+    case TOK_SIGNED:   return TYPE_SIGNED;
+    case TOK_UNSIGNED: return TYPE_UNSIGNED;
+    case TOK_VOID:     return TYPE_UNSIGNED;
+    case TOK_INT:      return TYPE_INT;
+    case TOK_CHAR:     return TYPE_CHAR;
+    case TOK_SHORT:    return TYPE_SHORT;
+    case TOK_LONG:     return TYPE_LONG;
+    case TOK_DOUBLE:   return TYPE_DOUBLE;
+    case TOK_FLOAT:    return TYPE_FLOAT;
+    case TOK_I8:       return TYPE_I8;
+    case TOK_U8:       return TYPE_U8;
+
+    case TOK_I16:      return TYPE_I16;
+    case TOK_U16:      return TYPE_U16;
+
+    case TOK_I32:      return TYPE_I32;
+    case TOK_U32:      return TYPE_U32;
+
+    case TOK_I64:      return TYPE_I64;
+    case TOK_U64:      return TYPE_U64;
+    default:           {
+        fprintf(stderr, "[error]: unexpected type_name `%s` within a declspec, expected a primitive type\n",
+                to_str(tok.tag));
+        fprintf(stderr, "         {signed, unsigned, void, int, char, short ...}\n");
+        fprintf(stderr, "         | %s\n", line_of(ast, ast.tokens[ast.toki]));
+        exit(1);
+    }
+    }
+}
+
 Type* declspec(Ast& ast) {
     using enum TokenTag;
     u64 type_id = 0;
     String name;
+    bool resolved = true;
+    bool seen_primitive = false;
 
     // while is typename
     while (true) {
-        match_t(ast.current) {
-            with TOK_SIGNED : type_id |= TYPE_SIGNED;
-            with TOK_UNSIGNED : type_id |= TYPE_UNSIGNED;
-            with TOK_VOID : type_id |= TYPE_UNSIGNED;
-            with TOK_INT : type_id |= TYPE_INT;
-            with TOK_CHAR : type_id |= TYPE_CHAR;
-            with TOK_SHORT : type_id |= TYPE_SHORT;
-            with TOK_LONG : type_id |= TYPE_LONG;
-            with TOK_DOUBLE : type_id |= TYPE_DOUBLE;
-            with TOK_FLOAT : type_id |= TYPE_FLOAT;
-            with TOK_I8 : type_id |= TYPE_I8;
-            with TOK_U8 : type_id |= TYPE_U8;
+        switch (ast.current.tag) {
+        case TOK_SIGNED:
+        case TOK_UNSIGNED:
+        case TOK_VOID:
+        case TOK_INT:
+        case TOK_CHAR:
+        case TOK_SHORT:
+        case TOK_LONG:
+        case TOK_DOUBLE:
+        case TOK_FLOAT:
+        case TOK_I8:
+        case TOK_U8:
+        case TOK_I16:
+        case TOK_U16:
+        case TOK_I32:
+        case TOK_U32:
+        case TOK_I64:
+        case TOK_U64:      {
+            type_id |= tag_to_primitive(ast, ast.current);
+            seen_primitive = true;
+            break;
+        }
 
-            with TOK_I16 : type_id |= TYPE_I16;
-            with TOK_U16 : type_id |= TYPE_U16;
+        case TOK_IDENTIFIER: {
+            if (seen_primitive) goto end;
+            type_id |= TYPE_NAME;
+            resolved = false;
+            name.append(ast.current.buf);
+            next_token(ast);
+            while (ast.current.tag == TOK_PERIOD or ast.current.tag == TOK_COLON_COLON) {
+                name.append(ast.current.tag == TOK_PERIOD ? "." : "::");
+                next_token(ast);
 
-            with TOK_I32 : type_id |= TYPE_I32;
-            with TOK_U32 : type_id |= TYPE_U32;
-
-            with TOK_I64 : type_id |= TYPE_I64;
-            with TOK_U64 : type_id |= TYPE_U64;
-            with TOK_IDENTIFIER : {
-                fprintf(stderr, "[error]: unexpected type_name `%.*s` within a declspec\n",
-                        FmtStrRef(ast.current.buf));
-                fprintf(stderr, "         | %s\n", line_of(ast, ast.tokens[ast.toki]));
-                goto end;
-                // exit(1);
+                Token member_tok = expect_token(ast, TOK_IDENTIFIER);
+                name.append(member_tok.buf);
             }
+
+            // fprintf(stderr, "[error]: unexpected type_name `%.*s` within a declspec\n",
+            //         FmtStrRef(ast.current.buf));
+            // fprintf(stderr, "         | %s\n", line_of(ast, ast.tokens[ast.toki]));
+            goto end;
+            // exit(1);
+        }
         default: goto end;
         }
         name.append({ast.current.buf, " "});
         next_token(ast);
     }
 end:
-    auto ty = Type{type_id, .name = name, .none = nullptr};
+    auto ty = Type{.id = type_id, .name = name, .resolved = resolved, .none = nullptr};
     return ast.new_type(ty);
 }
 
@@ -499,7 +547,6 @@ Node* parse_var_decl(Ast& ast) {
         is_static = true;
         next_token(ast);
     }
-
     auto base_ty = declspec(ast);
     String type_name = base_ty->name.copy();
 
@@ -606,6 +653,32 @@ Node* parse_block(Ast& ast) {
         .block = Block{.stmts = stmts.move()},
     });
 }
+bool is_declaration(Ast& ast) {
+    int i = ast.toki;
+
+    // Skip the first identifier and any `.` or `::` chains (e.g., Student.Name)
+    while (ast.tokens[i].tag == TOK_IDENTIFIER) {
+        i++;
+        if (ast.tokens[i].tag == TOK_PERIOD || ast.tokens[i].tag == TOK_COLON_COLON) {
+            i++;
+        } else {
+            break;
+        }
+    }
+
+    // After the base type, what comes next?
+    TokenTag next = ast.tokens[i].tag;
+
+    // If the next token is an identifier, it MUST be a declaration (e.g. `Student s`)
+    if (next == TOK_IDENTIFIER) return true;
+
+    // If you see a `*` followed by an identifier, it's likely a declaration `Student *s`
+    // (Note: this is technically ambiguous with multiplication in pure C, but standard C
+    // parsers resolve this with symbol tables instead).
+    if (next == TOK_ASTERISK && ast.tokens[i + 1].tag == TOK_IDENTIFIER) return true;
+
+    return false;
+}
 
 Node* parse_stmt(Ast& ast) {
     switch (ast.current.tag) {
@@ -655,6 +728,15 @@ Node* parse_stmt(Ast& ast) {
         printf("        | %s\n", line_of_error);
         exit(1);
     };
+
+    case TOK_IDENTIFIER: {
+        if (is_declaration(ast)) return parse_var_decl(ast);
+        else {
+            auto res = parse_expr(ast);
+            expect_token(ast, TOK_SEMICOLON);
+            return res;
+        }
+    }
     default: {
         auto res = parse_expr(ast);
         expect_token(ast, TOK_SEMICOLON);

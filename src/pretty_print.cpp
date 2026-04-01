@@ -56,6 +56,28 @@ void pp_node(Node* n, String prefix_str = "") {
         break;
     }
 
+    case AST_CONST_DECL: {
+        printf("%s%s -> %s\n", prefix.ptr, to_str(n->tag), "const");
+        prefix.append("    ");
+        printf("%sName = %.*s\n", prefix.ptr, FmtStrRef(n->var.name));
+        pp_node(n->var.init_expr, prefix);
+        break;
+    }
+    case AST_INFERRED_VAR_DECL: {
+        printf("%s%s -> %s\n", prefix.ptr, to_str(n->tag), "let");
+        prefix.append("    ");
+        printf("%sName = %.*s\n", prefix.ptr, FmtStrRef(n->var.name));
+        pp_node(n->var.init_expr, prefix);
+        break;
+    }
+    case AST_VAR_DECL: {
+        printf("%s%s -> %s\n", prefix.ptr, to_str(n->tag), n->type->to_str());
+        prefix.append("    ");
+        printf("%sName = %.*s\n", prefix.ptr, FmtStrRef(n->var.name));
+        pp_node(n->var.init_expr, prefix);
+        break;
+    }
+
     case AST_ADD:
     case AST_SUB:
     case AST_MUL:

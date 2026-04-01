@@ -3,50 +3,13 @@
 #include "cortex_map.h"
 
 // assumes __string_ref_v is of type StringRef
-#define copy_and_nullterm(__string_ref_v)                                                                    \
-    ({                                                                                                       \
-        auto buflen = __string_ref_v.size();                                                                 \
-        auto __buf = (char*)global_arena.alloc(buflen + 1);                                                  \
-        memcpy(__buf, __string_ref_v.data(), buflen);                                                        \
-        __buf[buflen] = '\0';                                                                                \
-        __buf;                                                                                               \
-    })
-
-StringMap<TokenTag, CortexStr> cortex_map = {
-    {"return", TOK_RETURN},   {"const", TOK_CONST},     {"let", TOK_LET},
-    {"static", TOK_STATIC},   {"if", TOK_IF},           {"else", TOK_ELSE},
-    {"for", TOK_FOR},         {"while", TOK_WHILE},     {"do", TOK_DO},
-    {"goto", TOK_GOTO},       {"switch", TOK_SWITCH},   {"case", TOK_CASE},
-    {"break", TOK_BREAK},     {"default", TOK_DEFAULT}, {"struct", TOK_STRUCT},
-    {"enum", TOK_ENUM},       {"union", TOK_UNION},     {"typedef", TOK_TYPEDEF},
-    {"sizeof", TOK_SIZEOF},   {"signed", TOK_SIGNED},   {"unsigned", TOK_UNSIGNED},
-    {"void", TOK_VOID},       {"int", TOK_INT},         {"bool", TOK_BOOL},
-    {"char", TOK_CHAR},       {"short", TOK_SHORT},     {"long", TOK_LONG},
-    {"float", TOK_FLOAT},     {"double", TOK_DOUBLE},   {"true", TOK_TRUE},
-    {"false", TOK_FALSE},     {"null", TOK_NULL},       {"u8", TOK_U8},
-    {"i8", TOK_I8},           {"u16", TOK_U16},         {"i16", TOK_I16},
-    {"u32", TOK_U32},         {"i32", TOK_I32},         {"u64", TOK_U64},
-    {"i64", TOK_I64},         {"f32", TOK_F32},         {"f64", TOK_F64},
-    {"include", TOK_INCLUDE},
-};
-
-// std::unordered_map<StringRef, TokenTag> map = {
-//     {"return", TOK_RETURN},   {"const", TOK_CONST},     {"let", TOK_LET},
-//     {"static", TOK_STATIC},   {"if", TOK_IF},           {"else", TOK_ELSE},
-//     {"for", TOK_FOR},         {"while", TOK_WHILE},     {"do", TOK_DO},
-//     {"goto", TOK_GOTO},       {"switch", TOK_SWITCH},   {"case", TOK_CASE},
-//     {"break", TOK_BREAK},     {"default", TOK_DEFAULT}, {"struct", TOK_STRUCT},
-//     {"enum", TOK_ENUM},       {"union", TOK_UNION},     {"typedef", TOK_TYPEDEF},
-//     {"sizeof", TOK_SIZEOF},   {"signed", TOK_SIGNED},   {"unsigned", TOK_UNSIGNED},
-//     {"void", TOK_VOID},       {"int", TOK_INT},         {"bool", TOK_BOOL},
-//     {"char", TOK_CHAR},       {"short", TOK_SHORT},     {"long", TOK_LONG},
-//     {"float", TOK_FLOAT},     {"double", TOK_DOUBLE},   {"true", TOK_TRUE},
-//     {"false", TOK_FALSE},     {"null", TOK_NULL},       {"u8", TOK_U8},
-//     {"i8", TOK_I8},           {"u16", TOK_U16},         {"i16", TOK_I16},
-//     {"u32", TOK_U32},         {"i32", TOK_I32},         {"u64", TOK_U64},
-//     {"i64", TOK_I64},         {"f32", TOK_F32},         {"f64", TOK_F64},
-//     {"include", TOK_INCLUDE},
-// };
+char* copy_and_nullterm(CortexStr __string_ref_v) {
+    auto buflen = __string_ref_v.size();
+    auto __buf = (char*)c_allocator.alloc(buflen + 1);
+    memcpy(__buf, __string_ref_v.data(), buflen);
+    __buf[buflen] = '\0';
+    return __buf;
+}
 
 void skip_whitespace(Lexer& self) {
     char c = self.source[self.pos];
@@ -98,6 +61,23 @@ Token new_token(Lexer& self, TokenTag kind, StringRef buf, u32 start, u32 end) {
 
 Token identifier(Lexer& self) {
     auto start = self.pos - 1;
+    static StringMap<TokenTag> keywords = {
+        {"return", TOK_RETURN},   {"const", TOK_CONST},     {"let", TOK_LET},
+        {"static", TOK_STATIC},   {"if", TOK_IF},           {"else", TOK_ELSE},
+        {"for", TOK_FOR},         {"while", TOK_WHILE},     {"do", TOK_DO},
+        {"goto", TOK_GOTO},       {"switch", TOK_SWITCH},   {"case", TOK_CASE},
+        {"break", TOK_BREAK},     {"default", TOK_DEFAULT}, {"struct", TOK_STRUCT},
+        {"enum", TOK_ENUM},       {"union", TOK_UNION},     {"typedef", TOK_TYPEDEF},
+        {"sizeof", TOK_SIZEOF},   {"signed", TOK_SIGNED},   {"unsigned", TOK_UNSIGNED},
+        {"void", TOK_VOID},       {"int", TOK_INT},         {"bool", TOK_BOOL},
+        {"char", TOK_CHAR},       {"short", TOK_SHORT},     {"long", TOK_LONG},
+        {"float", TOK_FLOAT},     {"double", TOK_DOUBLE},   {"true", TOK_TRUE},
+        {"false", TOK_FALSE},     {"null", TOK_NULL},       {"u8", TOK_U8},
+        {"i8", TOK_I8},           {"u16", TOK_U16},         {"i16", TOK_I16},
+        {"u32", TOK_U32},         {"i32", TOK_I32},         {"u64", TOK_U64},
+        {"i64", TOK_I64},         {"f32", TOK_F32},         {"f64", TOK_F64},
+        {"include", TOK_INCLUDE},
+    };
 
     while (true) {
         switch (self.source[self.pos]) {
@@ -106,12 +86,11 @@ Token identifier(Lexer& self) {
         case 'A' ... 'Z':
         case '_':         self.nextChar(); break;
         default:
-            auto buf = std::string_view(&self.source[start], self.pos - start);
-            auto cortex_buf = CortexStr(&self.source[start], self.pos - start);
-            auto kind = TOK_IDENTIFIER;
-            // if (auto iter = map.find(buf); iter != map.end()) { kind = iter->second; }
-            kind = cortex_map.get(cortex_buf).unwrap_or(TOK_IDENTIFIER);
-            return new_token(self, kind, StringRef(buf.data(), buf.size()), start, self.pos);
+            auto buf = CortexStr(&self.source[start], self.pos - start);
+
+            auto kind = keywords.get(buf).unwrap_or(TOK_IDENTIFIER);
+
+            return new_token(self, kind, buf, start, self.pos);
         }
     }
 }
@@ -125,7 +104,9 @@ Token number_literal(Lexer& self) {
             StringRef buf = StringRef(&self.source[start], self.pos - start);
             auto kind = TOK_NUMBER_LITERAL;
             auto t = new_token(self, kind, buf, start, self.pos);
-            t.value.integer = atoi(copy_and_nullterm(buf));
+            auto buf_cstr = copy_and_nullterm(buf);
+            t.value.integer = atoi(buf_cstr);
+            c_allocator.dealloc(buf_cstr);
             return t;
         }
     }
