@@ -961,6 +961,10 @@ template <typename T, usize FixedSize> struct StaticArray {
         return items[len - 1];
     }
 
+    usize size() const { return len; }
+    char* data() { return &items[0]; }
+    bool empty() const { return  capacity == 0; }
+    void destroy() {}
     T& last() {
         assert(len >= 1);
         return items[len - 1];
@@ -970,12 +974,10 @@ template <typename T, usize FixedSize> struct StaticArray {
     T* end() { return &items[FixedSize - 1]; }
 
     T& operator[](usize i) const {
-        assert(i < len && "access beyond the lenght of the array");
         return items[i];
     }
 
-    T operator[](usize i) {
-        assert(i < len && "access beyond the lenght of the array");
+    T& operator[](usize i) {
 
         return items[i];
     }
