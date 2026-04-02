@@ -132,25 +132,27 @@ struct ISymbolTable {
     virtual void exit_scope() = 0;
 
     // Symbol Management
-    virtual void declare(StringRef name, Symbol* sym) = 0;
+    virtual void declare(StringRef name, Symbol sym) = 0;
 
     // Looks up a symbol starting from the current scope, moving upwards
-    virtual Symbol* lookup(StringRef name) = 0;
+    virtual Option<Symbol> lookup(StringRef name) = 0;
 
     // Optional: Only check the current immediate scope (useful to catch duplicate declarations like `int x;
     // int x;`)
-    virtual Symbol* lookup_current_scope(StringRef name) = 0;
+    virtual Option<Symbol> lookup_current_scope(StringRef name) = 0;
 };
 
-struct StackSymbolTable : ISymbolTable {
-    Stack<StringMap<Symbol*>> scopes;
-    
-	StackSymbolTable(Arena* arena) : scopes(arena) {
+struct SymbolStack : ISymbolTable {
+    Stack<StringMap<Symbol>> scopes;
+    // uses c_allocator if not specified
+    SymbolStack() {}
+
+    SymbolStack(Arena* arena) : scopes(arena) {
         // Always push a global scope on initialization
         enter_scope();
     }
 
-    void enter_scope() override { scopes.append(StringMap<Symbol*>{}); }
+    void enter_scope() override { scopes.append(StringMap<Symbol>{}); }
 
     void exit_scope() override {
         // Destroy the deepest scope, dropping all its variables
@@ -158,12 +160,12 @@ struct StackSymbolTable : ISymbolTable {
             scopes.pop();
         }
     }
-    void declare(StringRef name, Symbol* sym) override {
+    void declare(StringRef name, Symbol sym) override {
         // Always declare in the most deeply nested scope
         scopes.last().put(name, sym);
     }
 
-    Symbol* lookup(StringRef name) override {
+    Option<Symbol> lookup(StringRef name) override {
         // Iterate backwards from innermost scope to global scope
         for (int i = scopes.len - 1; i >= 0; --i) {
             auto result = scopes[i].get(name);
@@ -172,7 +174,7 @@ struct StackSymbolTable : ISymbolTable {
         return nullptr; // Not found in any active scope
     }
 
-    Symbol* lookup_current_scope(StringRef name) override {
+    Option<Symbol> lookup_current_scope(StringRef name) override {
         auto result = scopes.last().get(name);
         if (result) return result.unwrap();
         return nullptr;
@@ -372,7 +374,9 @@ struct Ast {
     Arena arena{256 * 1024};
     DynArray<Node> node_pool{&arena};
     DynArray<Type> type_pool{&arena};
-    Scope* scope;
+    DynArray<String> known_types{&arena};
+    SymbolStack symbols{&arena};
+
     u32 toki; // current token index
 
     Ast() {
@@ -465,12 +469,14 @@ struct Ast {
 };
 
 Ast new_ast(File source);
-void record_types(Ast&);
+void record_struct_decl(Ast& ast, String parent_prefix = "");
+
 Option<Token> eat_token(Ast&, TokenTag);
 Token& expect_token(Ast&, TokenTag);
 Token& next_token(Ast&);
 bool is_typename(TokenTag kind);
 
+void record_types(Ast& ast);
 Type* parse_base_type(Ast& ast);
 Node* parse(Ast&); // the entry point
 Node* primary(Ast&);

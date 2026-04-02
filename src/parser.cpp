@@ -490,12 +490,7 @@ Type* declspec(Ast& ast) {
                 Token member_tok = expect_token(ast, TOK_IDENTIFIER);
                 name.append(member_tok.buf);
             }
-
-            // fprintf(stderr, "[error]: unexpected type_name `%.*s` within a declspec\n",
-            //         FmtStrRef(ast.current.buf));
-            // fprintf(stderr, "         | %s\n", line_of(ast, ast.tokens[ast.toki]));
             goto end;
-            // exit(1);
         }
         default: goto end;
         }
@@ -522,6 +517,11 @@ Node* parse_inferred_var_decl(Ast& ast) {
 Node* parse_const_var_decl(Ast& ast) {
     auto let_tok = next_token(ast);
     auto var_name = expect_token(ast, TOK_IDENTIFIER);
+    if (ast.current.tag == TOK_SEMICOLON) {
+        fprintf(stderr, "[error]: constants must be initialized on declaration\n");
+        fprintf(stderr, "%8d| %s\n", ast.current.loc.line, line_of(ast, ast.current));
+        exit(1);
+    }
     expect_token(ast, TOK_EQUAL);
     auto init_expr = parse_expr(ast);
     return ast.new_node({
@@ -532,10 +532,10 @@ Node* parse_const_var_decl(Ast& ast) {
 }
 
 Node* parse_var_decl(Ast& ast) {
-    using enum TokenTag;
     if (ast.current.tag == TOK_LET) return parse_inferred_var_decl(ast);
     if (ast.match({TOK_CONST, TOK_IDENTIFIER, TOK_EQUAL})) return parse_const_var_decl(ast);
 
+    Node* init_expr = nullptr;
     bool is_const = false;
     bool is_static = false;
 
@@ -583,8 +583,10 @@ Node* parse_var_decl(Ast& ast) {
         base_ty = ast.new_type(Type{.id = TYPE_ARRAY, .array = {.base = base_ty, .len = len_expr}});
     }
 
-    expect_token(ast, TOK_EQUAL);
-    auto init_expr = parse_expr(ast);
+    if (ast.current.tag == TOK_EQUAL) {
+        next_token(ast);
+        init_expr = parse_expr(ast);
+    }
 
     return ast.new_node(Node{
         .tag = AST_VAR_DECL,
@@ -678,6 +680,69 @@ bool is_declaration(Ast& ast) {
     if (next == TOK_ASTERISK && ast.tokens[i + 1].tag == TOK_IDENTIFIER) return true;
 
     return false;
+}
+
+// Pass "" for global structs, or "Student." for nested ones
+void record_struct_decl(Ast& ast, String parent_prefix) {
+    expect_token(ast, TOK_STRUCT); // Or TOK_UNION
+
+    String full_type_name = "";
+
+    // 1. Check if it has a name (Handle Anonymous Structs safely)
+    if (ast.current.tag == TOK_IDENTIFIER) {
+        String struct_name = ast.current.buf;
+
+        // e.g., "" + "Student" -> "Student"
+        // e.g., "Student." + "Name" -> "Student.Name"
+        full_type_name.append(parent_prefix);
+        full_type_name.append(struct_name);
+
+        // CRITICAL: Register the type immediately BEFORE parsing the body!
+        // This allows self-referential pointers like `Node *next;` to work.
+        ast.known_types.append(full_type_name);
+        ast.symbols.declare(full_type_name, {SYM_TYPE, full_type_name, nullptr, nullptr});
+        next_token(ast); // consume the name token
+    }
+
+    // 2. Parse the Body
+    if (ast.current.tag == TOK_LBRACE) {
+        next_token(ast);
+
+        while (ast.current.tag != TOK_RBRACE && ast.current.tag != TOK_EOF) {
+
+            // --> RECURSION FOR NESTED STRUCTS <--
+            if (ast.current.tag == TOK_STRUCT || ast.current.tag == TOK_UNION) {
+
+                // If the parent has a name, pass it down with a dot.
+                // Otherwise, pass nothing.
+                String next_prefix = full_type_name.empty() ? "" : full_type_name + ".";
+
+                // Recursively parse the nested struct!
+                record_struct_decl(ast, next_prefix);
+
+                // After the nested struct body, there is usually the field name
+                // e.g., `struct Name { int len; } my_name_field;`
+                if (ast.current.tag == TOK_IDENTIFIER) {
+                    next_token(ast); // consume `my_name_field`
+                }
+                expect_token(ast, TOK_SEMICOLON);
+            } else {
+                // It's a normal field (e.g., `int x;`)
+                // Call your existing field parsing logic here
+                parse_var_decl(ast);
+                expect_token(ast, TOK_SEMICOLON);
+            }
+        }
+        expect_token(ast, TOK_RBRACE);
+    }
+}
+
+void record_types(Ast& ast) {
+blk:
+    switch (ast.current.tag) {
+    case TOK_STRUCT: record_struct_decl(ast,"main."); goto blk;
+    default:         next_token(ast);
+    }
 }
 
 Node* parse_stmt(Ast& ast) {

@@ -1,6 +1,5 @@
 #include "ast.h"
 #include "cortex.h"
-#include "cortex_map.h"
 
 const char* pp_node(Node* n, String prefix = "");
 Result<u32> divide(u32 a, u32 b) {
@@ -32,4 +31,8 @@ int main(int argc, char* argv[]) {
     String prefix = "";
     defer(prefix.destroy());
     pp_node(res, prefix);
+    printf("=====================================================\n");
+    for (auto& s : ast.known_types) {
+        printf("type = %s\n", s.ptr);
+    }
 }

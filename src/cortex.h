@@ -16,6 +16,8 @@ typedef int32_t i32;
 typedef uint64_t u64;
 typedef int64_t i64;
 typedef size_t usize;
+struct String;
+struct CortexStr;
 
 constexpr size_t ARENA_DEFAULT_BLOCK_SIZE = 64 * 1024;
 
@@ -97,6 +99,11 @@ struct CortexStr : slice<char> {
     CortexStr(slice<char>& __slice) {
         this->ptr = __slice.ptr;
         this->len = __slice.len;
+    }
+
+    template <typename T = String> CortexStr(T& _str) {
+        this->ptr = _str.ptr;
+        this->len = _str.len;
     }
 
     CortexStr(const char* __str, usize len) {
@@ -537,7 +544,7 @@ template <typename T, usize Alignment = alignof(T)> struct RawArray {
 
 template <typename T> struct Stack : RawArray<T> {
     Allocator* allocator = &c_allocator;
-
+    Stack() {}
     explicit Stack(Allocator* _allocator) { this->allocator = _allocator; }
     explicit Stack(Allocator* _allocator, u32 _capacity) {
         this->allocator = _allocator;
@@ -648,7 +655,6 @@ template <typename T, usize Alignment = alignof(T)> struct DynArray {
         ensure_capacity(new_len);
         len = new_len;
     }
-    void pop() {}
     bool empty() const { return ptr == nullptr or capacity == 0; }
 
     const T& last() const {
@@ -910,6 +916,19 @@ struct String {
         if (len != _buf.len) return false;
         return memcmp(_buf.ptr, ptr, _buf.len) == 0;
     }
+
+    String operator+(String& s) {
+        String res = this->copy();
+        res.append(s);
+        return res;
+    }
+
+    String operator+(const char* s) {
+        String res = this->copy();
+        res.append(s);
+        return res;
+    }
+    operator CortexStr() { return CortexStr(ptr, len); }
 };
 
 template <typename T, usize FixedSize> struct StaticArray {
@@ -963,7 +982,7 @@ template <typename T, usize FixedSize> struct StaticArray {
 
     usize size() const { return len; }
     char* data() { return &items[0]; }
-    bool empty() const { return  capacity == 0; }
+    bool empty() const { return capacity == 0; }
     void destroy() {}
     T& last() {
         assert(len >= 1);
@@ -973,14 +992,9 @@ template <typename T, usize FixedSize> struct StaticArray {
     T* begin() { return &items[0]; }
     T* end() { return &items[FixedSize - 1]; }
 
-    T& operator[](usize i) const {
-        return items[i];
-    }
+    T& operator[](usize i) const { return items[i]; }
 
-    T& operator[](usize i) {
-
-        return items[i];
-    }
+    T& operator[](usize i) { return items[i]; }
 };
 
 template <typename T> struct Span {

@@ -2,6 +2,7 @@
 #include "cortex.h"
 #include "lexer.h"
 #include <cassert>
+#include <cstdio>
 
 Ast new_ast(File file) {
     Ast ast = {};
@@ -10,6 +11,23 @@ Ast new_ast(File file) {
     ast.current = ast.tokens[0];
     ast.file_name = file.name;
     ast.source = file.content;
+    record_types(ast);
+
+    for (auto& s : ast.known_types) {
+        printf("type = %s\n", s.ptr);
+    }
+    
+	if(auto sym = ast.symbols.lookup("main.Vec3f")){
+		printf("type symbol = %s\n",sym.unwrap().name.ptr);
+	}
+
+	if(auto sym = ast.symbols.lookup("main.Vec3f.fmt")){
+		printf("type symbol = %s\n",sym.unwrap().name.ptr);
+	}
+
+	ast.toki = 0;
+    ast.current = ast.tokens[0];
+
     return ast;
 }
 
