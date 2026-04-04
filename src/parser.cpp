@@ -446,7 +446,6 @@ u64 tag_to_primitive(Ast& ast, Token& tok) {
 }
 
 Type* declspec(Ast& ast) {
-    using enum TokenTag;
     u64 type_id = 0;
     String name;
     bool resolved = true;
@@ -476,7 +475,7 @@ Type* declspec(Ast& ast) {
             seen_primitive = true;
             break;
         }
-
+            // case TOK_STRUCT: return parse_struct_decl``
         case TOK_IDENTIFIER: {
             if (seen_primitive) goto end;
             type_id |= TYPE_NAME;
@@ -724,8 +723,8 @@ void record_struct_decl(Ast& ast, String parent_prefix) {
                 // e.g., `struct Name { int len; } my_name_field;`
                 if (ast.current.tag == TOK_IDENTIFIER) {
                     next_token(ast); // consume `my_name_field`
+                    expect_token(ast, TOK_SEMICOLON);
                 }
-                expect_token(ast, TOK_SEMICOLON);
             } else {
                 // It's a normal field (e.g., `int x;`)
                 // Call your existing field parsing logic here
@@ -740,9 +739,67 @@ void record_struct_decl(Ast& ast, String parent_prefix) {
 void record_types(Ast& ast) {
 blk:
     switch (ast.current.tag) {
-    case TOK_STRUCT: record_struct_decl(ast,"main."); goto blk;
+    case TOK_STRUCT: record_struct_decl(ast); goto blk;
     default:         next_token(ast);
     }
+}
+
+Node* parse_struct_decl(Ast& ast, Node* parent_prefix) {
+    auto strct_token = expect_token(ast, TOK_STRUCT); // Or TOK_UNION
+
+    String full_type_name = "";
+    Node* n = ast.new_node({.tag = AST_STRUCT, .main_token = strct_token, .struct_decl = {}});
+    // 1. Check if it has a name (Handle Anonymous Structs safely)
+
+    if (ast.current.tag == TOK_IDENTIFIER) {
+        String struct_name = ast.current.buf;
+
+        if (parent_prefix) { full_type_name.append({parent_prefix->struct_decl.name, "."}); }
+
+        full_type_name.append({struct_name});
+
+        if (auto id = ast.symbols.lookup(full_type_name)) { printf("TYPE = %s\n", id.unwrap().name.ptr); }
+        auto strct_name = next_token(ast);
+        n->main_token = strct_name;
+    }
+
+    if (ast.current.tag == TOK_LBRACE) {
+        next_token(ast);
+
+        while (ast.current.tag != TOK_RBRACE && ast.current.tag != TOK_EOF) {
+
+            if (ast.current.tag == TOK_STRUCT || ast.current.tag == TOK_UNION) {
+
+                String next_prefix = full_type_name.empty() ? "" : full_type_name + ".";
+
+                Node* child = parse_struct_decl(ast, parent_prefix);
+
+                // e.g., `struct Name { int len; } field_name;`
+                if (ast.current.tag == TOK_IDENTIFIER) {
+                    auto tok = next_token(ast);
+                    auto var_field_decl = ast.new_node({.tag = AST_VAR_DECL, .main_token = tok, .var = {}});
+                    var_field_decl->var.name = tok.buf;
+                    var_field_decl->var.type = ast.symbols.lookup(full_type_name).unwrap().type;
+                    if (ast.current.tag == TOK_EQUAL) {
+                        next_token(ast);
+                        var_field_decl->var.init_expr = parse_expr(ast);
+                    }
+                    expect_token(ast, TOK_SEMICOLON);
+                    n->struct_decl.fields.append(var_field_decl);
+                }
+
+                n->struct_decl.sub_decls.append(child);
+                // expect_token(ast, TOK_SEMICOLON);
+                return n;
+            } else {
+                auto field = parse_var_decl(ast);
+                expect_token(ast, TOK_SEMICOLON);
+                n->struct_decl.fields.append(field);
+            }
+        }
+        expect_token(ast, TOK_RBRACE);
+    }
+    return n;
 }
 
 Node* parse_stmt(Ast& ast) {

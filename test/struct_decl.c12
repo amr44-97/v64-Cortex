@@ -1,6 +1,9 @@
 struct Vec3f{
-    float x;
+    float x = 122;
     float y;
-    float z;
-    struct fmt{};
+    Vec3f* z;
+    Vec3f.fmt fdadas;  
+    fmt t;   
+    
+    struct fmt{  char* format; }
 }

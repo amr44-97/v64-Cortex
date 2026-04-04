@@ -77,7 +77,19 @@ void pp_node(Node* n, String prefix_str = "") {
         pp_node(n->var.init_expr, prefix);
         break;
     }
+    case AST_STRUCT: {
+        printf("%s%s -> %.*s\n", prefix.ptr, to_str(n->tag), FmtStrRef(n->main_token.buf));
+        prefix.append("    ");
+        for (usize i = 0; i < n->struct_decl.fields.len; ++i) {
+            pp_node(n->struct_decl.fields[i], prefix);
+        }
 
+        for (usize i = 0; i < n->struct_decl.sub_decls.len; ++i) {
+            pp_node(n->struct_decl.sub_decls[i], prefix);
+        }
+
+        break;
+    }
     case AST_ADD:
     case AST_SUB:
     case AST_MUL:

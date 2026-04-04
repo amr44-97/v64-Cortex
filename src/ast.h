@@ -84,13 +84,14 @@ struct PtrType {
 };
 
 struct Type {
-    u64 id;
-    String name = {};
+    u64 id;           // 8
+    String name = {}; // 16
+    u32 size;         // 4
     bool resolved = false;
     bool is_static = false;
     bool is_const = false;
 
-    union {
+    union { // 32 byte
         Container Struct;
         Container Enum;
         PtrType ptr;
@@ -229,8 +230,8 @@ struct Return {
 
 struct VarDecl {
     StringRef name;
-    Type* type;
-    Node* init_expr;
+    Type* type = nullptr;
+    Node* init_expr = nullptr;
 };
 
 struct IfStmt {
@@ -282,9 +283,10 @@ struct Cast {
     Node* expr;
 };
 
-struct StructT {
+struct StructDecl {
     String name;
-    DynArray<Node*> fields;
+    DynArray<Node*> fields = {};
+    DynArray<Node*> sub_decls = {};
 };
 
 struct StructField {
@@ -351,7 +353,7 @@ struct Node {
         LoopStmt for_stmt;
         Impl impl;
 
-        StructT struct_decl;
+        StructDecl struct_decl;
         StructField struct_field;
         Include include;
         Defer defer;
@@ -470,6 +472,7 @@ struct Ast {
 
 Ast new_ast(File source);
 void record_struct_decl(Ast& ast, String parent_prefix = "");
+Node* parse_struct_decl(Ast& ast, Node* parent_prefix);
 
 Option<Token> eat_token(Ast&, TokenTag);
 Token& expect_token(Ast&, TokenTag);

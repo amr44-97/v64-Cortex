@@ -1056,6 +1056,7 @@ template <typename T> struct [[nodiscard]] Option {
     }
     operator bool() { return _M_value != nullptr; }
     bool operator==(void* p) { return (void*)_M_value == p; }
+    bool operator==(std::nullptr_t nt) { return _M_value == nt; }
     bool operator==(Option<T> _v) { return *_M_value == _v; }
 };
 

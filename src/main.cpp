@@ -27,11 +27,10 @@ int main(int argc, char* argv[]) {
     defer(ast.deinit());
     // ast.dump_tokens();
 
-    auto res = parse_block(ast); // declspec(ast)
+    auto res = parse_struct_decl(ast, nullptr); // declspec(ast)
     String prefix = "";
     defer(prefix.destroy());
     pp_node(res, prefix);
-    printf("=====================================================\n");
     for (auto& s : ast.known_types) {
         printf("type = %s\n", s.ptr);
     }
