@@ -45,7 +45,9 @@ template <typename Key, typename T, u64 HashFn(Key s)> struct HashMap {
     int used = 0;
 
     HashMap() {}
-    HashMap(std::initializer_list<Pair<Key, T>> list) {
+    HashMap(Allocator* allocator) { buckets.allocator = allocator; }
+    HashMap(Allocator* allocator, std::initializer_list<Pair<Key, T>> list) {
+        buckets.allocator = allocator;
         for (auto i : list) {
             put(i.key, i.value);
         }
@@ -293,6 +295,5 @@ template <typename Key, typename T, u64 HashFn(Key s), u64 capacity> struct Stat
 };
 
 template <typename T> using StringMap = HashMap<CortexStr, T, fnv_hash>;
-
 
 #endif
